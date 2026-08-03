@@ -6,12 +6,10 @@
 #   ../devenv/disable-frr --dry-run
 #   ../devenv/disable-frr
 #
-# This is the counterpart to enable-frr, and it is the less well
-# understood direction. Enabling was observed to complete cleanly;
-# disabling has not been. OVN-Kubernetes may or may not unwind the
-# advertisement state, and CNO has to tear down the frr-k8s daemonset
-# rather than stand it up. Treat it as a change that needs watching, not
-# a tidy-up you run and walk away from.
+# This is the counterpart to enable-frr, and it does unwind: CNO removes
+# the frr-k8s daemonset and its namespace, then rolls ovnkube-node back
+# across the cluster. Observed once, on OCP 5.0, taking a couple of
+# minutes end to end with co/network never leaving Degraded=False.
 #
 # It refuses while a CUDNBgpConfig exists, because the operator patches
 # the Network CR straight back during reconcile and you would be
@@ -79,28 +77,38 @@ fi
 oc patch network.operator.openshift.io cluster --type=merge -p "$patch"
 
 echo
-echo "Waiting for the network rollout (up to ${timeout_secs}s)..."
+echo "Waiting for CNO to remove frr-k8s and settle (up to ${timeout_secs}s)..."
 
+# Wait on the namespace disappearing, not on Progressing going false.
+# Progressing is still false in the moments after patching, because CNO
+# has not looked yet, so polling it reports success before anything has
+# happened. Waiting for something to *become* true cannot be satisfied by
+# the state we started in.
 deadline=$((SECONDS + timeout_secs))
+frr_gone=false
 while [ "$SECONDS" -lt "$deadline" ]; do
-    progressing="$(oc get co network -o jsonpath='{.status.conditions[?(@.type=="Progressing")].status}' 2>/dev/null || true)"
     degraded="$(oc get co network -o jsonpath='{.status.conditions[?(@.type=="Degraded")].status}' 2>/dev/null || true)"
-
     if [ "$degraded" = "True" ]; then
         echo "Error: co/network went Degraded" >&2
         oc get co network >&2
         exit 1
     fi
 
-    if [ "$progressing" = "False" ]; then
-        echo
-        oc get co network
-        echo
-        echo "frr-k8s namespace: $(oc get ns openshift-frr-k8s -o jsonpath='{.status.phase}' 2>/dev/null || echo gone)"
-        echo
-        echo "Done. The frrk8s and RouteAdvertisements CRDs may remain; CNO"
-        echo "owns those and this does not remove them."
-        exit 0
+    if [ "$frr_gone" = false ]; then
+        if ! oc get ns openshift-frr-k8s >/dev/null 2>&1; then
+            frr_gone=true
+            echo "frr-k8s namespace removed"
+        fi
+    else
+        progressing="$(oc get co network -o jsonpath='{.status.conditions[?(@.type=="Progressing")].status}' 2>/dev/null || true)"
+        if [ "$progressing" = "False" ]; then
+            echo
+            oc get co network
+            echo
+            echo "Done. The frrk8s and RouteAdvertisements CRDs remain; CNO"
+            echo "owns those and this does not remove them."
+            exit 0
+        fi
     fi
 
     sleep 10

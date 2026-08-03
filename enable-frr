@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+#
+# Enable FRR and route advertisements on the cluster's Network CR,
+# then wait until the APIs the operator needs actually exist.
+#
+# Without frrk8s.metallb.io and RouteAdvertisements the manager does
+# not start at all: controller-runtime gives up waiting for those
+# caches after two minutes and the process exits. The operator
+# applies this same patch itself during reconcile, but it never
+# reaches reconcile, so something has to go first.
+#
+# The patch mirrors internal/controller/network_operator.go.
+#
+#   ../devenv/enable-frr
+#
+# Applying it rolls out OVN-Kubernetes across the cluster and stands
+# up an frr-k8s daemonset. Treat it as one-way: setting
+# routeAdvertisements back to Disabled restores the field, but
+# whether OVN-Kubernetes unwinds the state is untested.
+
+set -euo pipefail
+
+timeout_secs="${TIMEOUT:-900}"
+
+patch='{"spec":{"additionalRoutingCapabilities":{"providers":["FRR"]},"defaultNetwork":{"ovnKubernetesConfig":{"routeAdvertisements":"Enabled"}}}}'
+
+if ! oc whoami >/dev/null 2>&1; then
+    echo "Error: not connected to a cluster" >&2
+    exit 1
+fi
+
+echo "Cluster:  $(oc whoami --show-server)"
+echo "As:       $(oc whoami)"
+echo
+
+# Re-applying the same values is a no-op, so this is safe to rerun.
+oc patch network.operator.openshift.io cluster --type=merge -p "$patch"
+
+echo
+echo "Waiting for frr-k8s and the network rollout (up to ${timeout_secs}s)..."
+
+deadline=$((SECONDS + timeout_secs))
+while [ "$SECONDS" -lt "$deadline" ]; do
+    crd="$(oc get crd frrconfigurations.frrk8s.metallb.io -o name 2>/dev/null || true)"
+    progressing="$(oc get co network -o jsonpath='{.status.conditions[?(@.type=="Progressing")].status}' 2>/dev/null || true)"
+    degraded="$(oc get co network -o jsonpath='{.status.conditions[?(@.type=="Degraded")].status}' 2>/dev/null || true)"
+
+    if [ "$degraded" = "True" ]; then
+        echo "Error: co/network went Degraded" >&2
+        oc get co network >&2
+        exit 1
+    fi
+
+    if [ -n "$crd" ] && [ "$progressing" = "False" ]; then
+        echo
+        oc get crd | grep -E 'frrk8s|routeadvertisement'
+        echo
+        oc get ds -n openshift-frr-k8s
+        echo
+        echo "Ready. The operator can start now."
+        exit 0
+    fi
+
+    sleep 10
+done
+
+echo "Error: timed out after ${timeout_secs}s" >&2
+echo "  frrconfigurations CRD: ${crd:-absent}" >&2
+echo "  co/network Progressing: ${progressing:-unknown}" >&2
+exit 1

@@ -4,6 +4,7 @@
 # associations and peers.
 #
 #   ../devenv/list-route-servers
+#   ../devenv/list-route-servers --all
 #   AWS_REGION=us-west-2 ../devenv/list-route-servers
 #
 # Deliberately account-wide rather than scoped to your cluster. These
@@ -12,9 +13,29 @@
 # here that nobody owns any more" rather than "what did I make".
 # Anything whose VPC has gone is flagged as orphaned.
 #
+# AWS keeps returning route servers, endpoints and peers long after they
+# are deleted. Those tombstones cannot be acted on and quickly outnumber
+# everything else, so they are hidden by default and counted rather than
+# dropped in silence. --all shows them.
+#
 # Read-only.
 
 set -euo pipefail
+
+show_all=false
+case "${1:-}" in
+    --all) show_all=true ;;
+    "") ;;
+    *) echo "Usage: ${0##*/} [--all]" >&2; exit 1 ;;
+esac
+
+# JMESPath clause dropping tombstones, or nothing at all with --all.
+# Chained filters do not compose, so this is spliced into one predicate.
+if [ "$show_all" = true ]; then
+    not_dead=""
+else
+    not_dead=" && State!='deleted'"
+fi
 
 if ! aws sts get-caller-identity >/dev/null 2>&1; then
     echo "Error: no usable AWS credentials" >&2
@@ -40,10 +61,17 @@ echo "Region:  $AWS_REGION"
 echo "Account: $(aws sts get-caller-identity --query Account --output text)"
 echo
 
-servers="$(aws ec2 describe-route-servers --query 'RouteServers[].RouteServerId' --output text)"
+if [ "$show_all" = true ]; then
+    servers="$(aws ec2 describe-route-servers --query 'RouteServers[].RouteServerId' --output text)"
+else
+    servers="$(aws ec2 describe-route-servers --query "RouteServers[?State!='deleted'].RouteServerId" --output text)"
+fi
+hidden_rs="$(aws ec2 describe-route-servers --query "length(RouteServers[?State=='deleted'])" --output text)"
 
 if [ -z "$servers" ]; then
-    echo "No route servers."
+    echo "No live route servers."
+    [ "$show_all" = false ] && [ "$hidden_rs" != "0" ] && \
+        echo "($hidden_rs deleted, hidden; --all to show)"
     exit 0
 fi
 
@@ -75,7 +103,7 @@ for rs in $servers; do
     done
 
     endpoints="$(aws ec2 describe-route-server-endpoints \
-        --query "RouteServerEndpoints[?RouteServerId=='$rs'].RouteServerEndpointId" \
+        --query "RouteServerEndpoints[?RouteServerId=='$rs'$not_dead].RouteServerEndpointId" \
         --output text)"
 
     if [ -z "$endpoints" ]; then
@@ -88,7 +116,7 @@ for rs in $servers; do
         echo "    endpoint $e  $subnet  $eni  $est"
 
         peers="$(aws ec2 describe-route-server-peers \
-            --query "RouteServerPeers[?RouteServerEndpointId=='$e'].[RouteServerPeerId,PeerAddress,State]" \
+            --query "RouteServerPeers[?RouteServerEndpointId=='$e'$not_dead].[RouteServerPeerId,PeerAddress,State]" \
             --output text || true)"
         while read -r pid paddr pstate; do
             [ -n "$pid" ] || continue
@@ -97,3 +125,13 @@ for rs in $servers; do
     done
     echo
 done
+
+if [ "$show_all" = false ]; then
+    dead_ep="$(aws ec2 describe-route-server-endpoints \
+        --query "length(RouteServerEndpoints[?State=='deleted'])" --output text 2>/dev/null || echo 0)"
+    dead_peer="$(aws ec2 describe-route-server-peers \
+        --query "length(RouteServerPeers[?State=='deleted'])" --output text 2>/dev/null || echo 0)"
+    if [ "$hidden_rs" != "0" ] || [ "$dead_ep" != "0" ] || [ "$dead_peer" != "0" ]; then
+        echo "Hidden: $hidden_rs deleted route server(s), $dead_ep endpoint(s), $dead_peer peer(s). --all to show."
+    fi
+fi

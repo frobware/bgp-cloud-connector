@@ -39,9 +39,16 @@ oc patch network.operator.openshift.io cluster --type=merge -p "$patch"
 echo
 echo "Waiting for frr-k8s and the network rollout (up to ${timeout_secs}s)..."
 
+# Wait on the frr-k8s daemonset being fully ready, not on the CRD
+# existing. The CRD was a sound signal exactly once: disable-frr leaves
+# the CRDs behind, because CNO owns them, so on any later enable it is
+# already true at the moment of patching and the wait falls through
+# before CNO has done anything. The signal has to be something this
+# patch actually changes.
 deadline=$((SECONDS + timeout_secs))
 while [ "$SECONDS" -lt "$deadline" ]; do
-    crd="$(oc get crd frrconfigurations.frrk8s.metallb.io -o name 2>/dev/null || true)"
+    desired="$(oc get ds -n openshift-frr-k8s frr-k8s -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || true)"
+    ready="$(oc get ds -n openshift-frr-k8s frr-k8s -o jsonpath='{.status.numberReady}' 2>/dev/null || true)"
     progressing="$(oc get co network -o jsonpath='{.status.conditions[?(@.type=="Progressing")].status}' 2>/dev/null || true)"
     degraded="$(oc get co network -o jsonpath='{.status.conditions[?(@.type=="Degraded")].status}' 2>/dev/null || true)"
 
@@ -51,7 +58,7 @@ while [ "$SECONDS" -lt "$deadline" ]; do
         exit 1
     fi
 
-    if [ -n "$crd" ] && [ "$progressing" = "False" ]; then
+    if [ -n "$desired" ] && [ "$desired" != "0" ] && [ "$ready" = "$desired" ] && [ "$progressing" = "False" ]; then
         echo
         oc get crd | grep -E 'frrk8s|routeadvertisement'
         echo
@@ -61,10 +68,12 @@ while [ "$SECONDS" -lt "$deadline" ]; do
         exit 0
     fi
 
+    echo "  frr-k8s ${ready:-0}/${desired:-?} ready, co/network Progressing=$progressing"
+
     sleep 10
 done
 
 echo "Error: timed out after ${timeout_secs}s" >&2
-echo "  frrconfigurations CRD: ${crd:-absent}" >&2
+echo "  frr-k8s daemonset: ${ready:-0}/${desired:-absent} ready" >&2
 echo "  co/network Progressing: ${progressing:-unknown}" >&2
 exit 1

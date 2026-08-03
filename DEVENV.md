@@ -35,6 +35,7 @@ flake and one lock file.
 | `create-route-servers` | Creates the AWS Route Servers the operator expects to discover |
 | `list-route-servers` | Shows every route server in a region, flagging orphans |
 | `delete-route-servers` | Tears them down again |
+| `restore-source-dest-check` | Re-enables SourceDestCheck on the router nodes, which nothing else undoes |
 | `e2e-profiles/<name>/` | Fixtures for `make test-e2e-aws <name>`, linked into `test/e2e/manifests/` |
 
 ## Working on the operator

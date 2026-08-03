@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+#
+# Re-enable SourceDestCheck on the router nodes' primary ENIs.
+#
+#   ../devenv/restore-source-dest-check --dry-run
+#   ../devenv/restore-source-dest-check
+#
+# The operator disables SourceDestCheck so those nodes can forward pod
+# traffic. It never re-enables it: nothing in the deletion path touches
+# the attribute, so it outlives the CUDNBgpConfig, the operator and the
+# route servers, and is left behind on a cluster somebody else owns.
+#
+# True is the EC2 default, which is what this restores. NODE_SELECTOR
+# overrides the label used to find the nodes, in case you have already
+# removed it.
+
+set -euo pipefail
+
+selector="${NODE_SELECTOR:-bgp_router=true}"
+dry_run=false
+
+case "${1:-}" in
+    --dry-run) dry_run=true ;;
+    "") ;;
+    *) echo "Usage: ${0##*/} [--dry-run]" >&2; exit 1 ;;
+esac
+
+if ! oc whoami >/dev/null 2>&1; then
+    echo "Error: not connected to a cluster" >&2
+    exit 1
+fi
+
+if ! aws sts get-caller-identity >/dev/null 2>&1; then
+    echo "Error: no usable AWS credentials" >&2
+    echo "Select a profile, e.g. AWS_PROFILE=saml ${0##*/}" >&2
+    echo "Available: $(aws configure list-profiles 2>/dev/null | tr '\n' ' ')" >&2
+    exit 1
+fi
+
+: "${AWS_REGION:=$(oc get infrastructure cluster -o jsonpath='{.status.platformStatus.aws.region}')}"
+export AWS_REGION
+
+nodes="$(oc get nodes -l "$selector" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.providerID}{"\n"}{end}')"
+
+if [ -z "$nodes" ]; then
+    echo "No nodes match $selector in this cluster."
+    echo "If you have already removed the label, set NODE_SELECTOR to something that matches."
+    exit 0
+fi
+
+echo "Region:   $AWS_REGION"
+echo "Selector: $selector"
+echo
+
+changed=0
+while read -r name provider; do
+    [ -n "$name" ] || continue
+    instance="${provider##*/}"
+
+    eni="$(aws ec2 describe-instances --instance-ids "$instance" \
+        --query 'Reservations[].Instances[].NetworkInterfaces[?Attachment.DeviceIndex==`0`].NetworkInterfaceId | []' \
+        --output text)"
+
+    if [ -z "$eni" ] || [ "$eni" = "None" ]; then
+        echo "$name: no primary ENI found for $instance, skipping" >&2
+        continue
+    fi
+
+    current="$(aws ec2 describe-network-interfaces --network-interface-ids "$eni" \
+        --query 'NetworkInterfaces[0].SourceDestCheck' --output text)"
+
+    if [ "$current" = "True" ]; then
+        echo "$name: $eni already True"
+        continue
+    fi
+
+    if [ "$dry_run" = true ]; then
+        echo "$name: $eni is $current"
+        echo "  would run: aws ec2 modify-network-interface-attribute --network-interface-id $eni --source-dest-check '{\"Value\":true}'"
+    else
+        echo "$name: $eni $current -> True"
+        aws ec2 modify-network-interface-attribute \
+            --network-interface-id "$eni" \
+            --source-dest-check '{"Value":true}'
+    fi
+    changed=$((changed + 1))
+done <<<"$nodes"
+
+echo
+if [ "$dry_run" = true ]; then
+    echo "Dry run only, $changed interface(s) would change."
+else
+    echo "Restored $changed interface(s)."
+    echo "Note the operator will disable it again if a CUDNBgpConfig still exists."
+fi

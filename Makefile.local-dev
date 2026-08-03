@@ -7,13 +7,18 @@
 # first, then:
 #
 #   make -f Makefile.local-dev image
+#   make -f Makefile.local-dev push IMAGE_TAG=my-experiment
 #   make -f Makefile.local-dev run ARGS='--help'
 
 CONTAINER_TOOL ?= podman
-DEV_IMG ?= bgp-cloud-connector:dev
+REGISTRY ?= quay.io
+ORG ?= amcdermo
+IMAGE_NAME ?= bgp-cloud-connector
+IMAGE_TAG ?= latest
+DEV_IMG ?= $(REGISTRY)/$(ORG)/$(IMAGE_NAME):$(IMAGE_TAG)
 CONTAINERFILE := Containerfile.bgp-cloud-connector.dev
 
-.PHONY: all build image run clean help
+.PHONY: all build image push run clean help
 
 all: image
 
@@ -22,6 +27,9 @@ build: ## Build bin/manager on the host, statically linked.
 
 image: build ## Copy bin/manager into a local image.
 	$(CONTAINER_TOOL) build -f $(CONTAINERFILE) --ignorefile $(CONTAINERFILE).dockerignore -t $(DEV_IMG) .
+
+push: image ## Push the image to the registry.
+	$(CONTAINER_TOOL) push $(DEV_IMG)
 
 run: ## Run the image. Usage: make -f Makefile.local-dev run ARGS='--help'
 	$(CONTAINER_TOOL) run --rm $(DEV_IMG) $(ARGS)
@@ -32,3 +40,6 @@ clean: ## Remove the binary and the local image.
 
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-8s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@echo
+	@echo "  Image: $(DEV_IMG)"
+	@echo "  Override with REGISTRY, ORG, IMAGE_NAME or IMAGE_TAG."

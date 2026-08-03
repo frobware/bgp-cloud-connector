@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#
+# Symlink the devenv files into a sibling worktree, so a fresh
+# worktree picks up the nix shell and the fast container build
+# without copying anything.
+#
+#   cd ../general && ../devenv/link-worktree
+#   ../devenv/link-worktree ../general
+#
+# flake.nix is not linked by design: .envrc resolves the flake
+# through ../devenv, so one flake and one lock file serve every
+# worktree.
+
+set -euo pipefail
+
+devenv_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+target="${1:-$PWD}"
+
+files=(
+    .envrc
+    Containerfile.bgp-cloud-connector.dev
+    Containerfile.bgp-cloud-connector.dev.dockerignore
+    Makefile.local-dev
+)
+
+if ! target="$(cd "$target" 2>/dev/null && pwd)"; then
+    echo "Error: no such directory: ${1:-$PWD}" >&2
+    exit 1
+fi
+
+if [ "$target" = "$devenv_dir" ]; then
+    echo "Error: refusing to link devenv into itself" >&2
+    exit 1
+fi
+
+# The links are relative, so they only resolve between siblings.
+if [ "$(dirname "$target")" != "$(dirname "$devenv_dir")" ]; then
+    echo "Error: $target is not a sibling of $devenv_dir" >&2
+    echo "Relative links to ../devenv would dangle there." >&2
+    exit 1
+fi
+
+for f in "${files[@]}"; do
+    ln -sfn "../devenv/$f" "$target/$f"
+    echo "$f -> ../devenv/$f"
+done
+
+echo
+echo "Now run: direnv allow $target"

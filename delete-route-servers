@@ -104,9 +104,29 @@ fi
 
 # Peers hold endpoints open, so they go first. The operator creates
 # these, which is why they may exist even though we never made any.
+#
+# Only peers that are actually alive can be deleted. AWS keeps listing
+# peers for a long time after removing them, and rejects a delete of one
+# already gone, or of one still coming up, with IncorrectState:
+#
+#   An error occurred (IncorrectState): Route Server Peer rsp-... is in
+#   an invalid state.
+#
+# So wait out anything still pending, then delete only what is available.
+if [ "$dry_run" = false ] && [ -n "$endpoints" ]; then
+    for i in $(seq 1 30); do
+        pending="$(aws ec2 describe-route-server-peers \
+            --query "length(RouteServerPeers[?State=='pending'])" --output text 2>/dev/null || echo 0)"
+        [ "$pending" = "0" ] && break
+        echo "Waiting for $pending peer(s) to leave pending..."
+        sleep 10
+    done
+fi
+
 for e in $endpoints; do
     peers="$(aws ec2 describe-route-server-peers \
-        --query "RouteServerPeers[?RouteServerEndpointId=='$e'].RouteServerPeerId" --output text)"
+        --query "RouteServerPeers[?RouteServerEndpointId=='$e' && State=='available'].RouteServerPeerId" \
+        --output text)"
     for p in $peers; do
         echo "Deleting peer $p"
         run aws ec2 delete-route-server-peer --route-server-peer-id "$p"

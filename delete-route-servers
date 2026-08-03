@@ -81,13 +81,17 @@ echo
 # DescribeRouteServerEndpoints and DescribeRouteServerPeers both
 # reject route-server-id and route-server-endpoint-id as filters, so
 # every selection here happens client-side.
+# Only endpoints that are alive can be deleted, for the same reason as
+# peers below: AWS keeps listing them once gone and rejects a delete of
+# one already deleted with IncorrectState.
 endpoints="$(aws ec2 describe-route-server-endpoints \
-    --query "RouteServerEndpoints[?RouteServerId=='$rs'].RouteServerEndpointId" --output text)"
+    --query "RouteServerEndpoints[?RouteServerId=='$rs' && State=='available'].RouteServerEndpointId" --output text)"
 
 vpcs="$(aws ec2 get-route-server-associations --route-server-id "$rs" \
     --query 'RouteServerAssociations[].VpcId' --output text 2>/dev/null || echo "")"
 
 echo "Will delete:"
+if [ -z "$endpoints" ]; then echo "  (no live endpoints)"; fi
 for e in $endpoints; do echo "  endpoint $e"; done
 for v in $vpcs; do echo "  association with $v"; done
 echo "  route server $rs"
@@ -142,7 +146,7 @@ if [ "$dry_run" = false ] && [ -n "$endpoints" ]; then
     echo "Waiting for endpoints to go away..."
     for i in $(seq 1 60); do
         left="$(aws ec2 describe-route-server-endpoints \
-            --query "length(RouteServerEndpoints[?RouteServerId=='$rs'])" --output text 2>/dev/null || echo 0)"
+            --query "length(RouteServerEndpoints[?RouteServerId=='$rs' && State!='deleted'])" --output text 2>/dev/null || echo 0)"
         [ "$left" = "0" ] && break
         sleep 10
     done

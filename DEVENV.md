@@ -35,6 +35,7 @@ flake and one lock file.
 | `create-route-servers` | Creates the AWS Route Servers the operator expects to discover |
 | `list-route-servers` | Shows every route server in a region, flagging orphans |
 | `delete-route-servers` | Tears them down again |
+| `e2e-profiles/<name>/` | Fixtures for `make test-e2e-aws <name>`, linked into `test/e2e/manifests/` |
 
 ## Working on the operator
 
@@ -92,6 +93,21 @@ survive the cluster being reaped:
 ../devenv/list-route-servers
 ../devenv/delete-route-servers --yes
 ```
+
+## Running the e2e suite
+
+```
+export AWS_PROFILE=saml
+make test-e2e-aws qe
+```
+
+The trailing `qe` names a directory under `test/e2e/manifests/`, which
+`link-worktree` symlinks to `e2e-profiles/qe` here. It carries the route
+server ID that `create-route-servers` printed, so it needs updating
+whenever you build new route servers.
+
+The suite cleans up after itself and generates its namespace name, so a
+failed run no longer blocks the next one.
 
 All of this duplicates what the rosa-bgp Terraform does, and should
 not outlive getting access to it.

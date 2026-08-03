@@ -45,5 +45,16 @@ for f in "${files[@]}"; do
     echo "$f -> ../devenv/$f"
 done
 
+# The e2e profiles have to sit where the suite looks for them, which is
+# nested rather than at the top level, so they need their own link.
+for profile in "$devenv_dir"/e2e-profiles/*/; do
+    [ -d "$profile" ] || continue
+    name="$(basename "$profile")"
+    dest="$target/test/e2e/manifests"
+    [ -d "$dest" ] || continue
+    ln -sfn "../../../../devenv/e2e-profiles/$name" "$dest/$name"
+    echo "test/e2e/manifests/$name -> ../../../../devenv/e2e-profiles/$name"
+done
+
 echo
 echo "Now run: direnv allow $target"

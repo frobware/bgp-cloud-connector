@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+#
+# Install Red Hat's aws-saml.py on NixOS.
+#
+# aws-saml.py mints the temporary AWS credentials you need to reach
+# the QE account, since permanent IAM users are gone. The published
+# instructions assume Fedora: dnf install python3-devel krb5-devel
+# openldap-devel, then let pip build gssapi and python-ldap from
+# source. That fails here, gssapi does not compile against the nix
+# krb5 headers:
+#
+#   error: implicit declaration of function
+#          'gss_add_cred_impersonate_name'
+#
+# So take those two compiled modules from nixpkgs, which already has
+# them built, and let pip install only what is left.
+#
+#   ../devenv/install-aws-saml
+#
+# Needs the VPN for gitlab.cee.redhat.com. Running aws-saml.py
+# afterwards needs a Kerberos ticket: kinit <you>@IPA.REDHAT.COM
+#
+# The virtualenv points into the nix store without holding a GC
+# root, so nix-collect-garbage can break it. Rerun this to rebuild.
+
+set -euo pipefail
+
+venv="${VENV:-$HOME/.venvs/aws-saml}"
+repo="git+https://gitlab.cee.redhat.com/compute/aws-automation.git"
+
+python_env='(builtins.getFlake "nixpkgs").legacyPackages.${builtins.currentSystem}.python3.withPackages (ps: with ps; [ gssapi python-ldap boto3 requests lxml ])'
+
+if ! getent hosts gitlab.cee.redhat.com >/dev/null 2>&1; then
+    echo "Error: cannot resolve gitlab.cee.redhat.com; are you on the VPN?" >&2
+    exit 1
+fi
+
+echo "Installing into $venv"
+rm -rf "$venv"
+
+nix shell --impure --expr "$python_env" --command bash -c "
+    set -e
+    python -m venv --system-site-packages '$venv'
+    '$venv/bin/pip' install --quiet --upgrade pip
+    '$venv/bin/pip' install --quiet --upgrade '$repo'
+"
+
+if [ ! -x "$venv/bin/aws-saml.py" ]; then
+    echo "Error: aws-saml.py not found in $venv/bin after install" >&2
+    ls "$venv/bin" >&2
+    exit 1
+fi
+
+# Confirm the compiled modules resolve outside the nix shell too,
+# which is where you will actually run this from.
+if ! "$venv/bin/python" -c 'import gssapi, ldap' 2>/dev/null; then
+    echo "Error: gssapi or python-ldap do not import from $venv" >&2
+    exit 1
+fi
+
+cat <<EOF
+
+Installed. To mint credentials for the QE account, non-interactively
+and for a full working day rather than the default hour:
+
+  kinit ${KRB_USER:-<your-kerberos-id>}@IPA.REDHAT.COM   # if klist -s fails
+  $venv/bin/aws-saml.py \\
+      --target-account ${AWS_ACCOUNT:-<account-id>} \\
+      --target-role ${AWS_ACCOUNT:-<account-id>}-poweruser \\
+      --target-profile saml \\
+      --session-duration 43200
+
+Run it bare to pick the account and role from a list instead.
+
+It honours AWS_SHARED_CREDENTIALS_FILE, so the profile lands in
+${AWS_SHARED_CREDENTIALS_FILE:-~/.aws/credentials}
+
+Then, from a worktree:
+
+  AWS_PROFILE=saml ../devenv/create-route-servers --dry-run
+EOF

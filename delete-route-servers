@@ -76,9 +76,11 @@ echo "Cluster:      $infra"
 echo "Route server: $rs"
 echo
 
+# DescribeRouteServerEndpoints and DescribeRouteServerPeers both
+# reject route-server-id and route-server-endpoint-id as filters, so
+# every selection here happens client-side.
 endpoints="$(aws ec2 describe-route-server-endpoints \
-    --filters "Name=route-server-id,Values=$rs" \
-    --query 'RouteServerEndpoints[].RouteServerEndpointId' --output text)"
+    --query "RouteServerEndpoints[?RouteServerId=='$rs'].RouteServerEndpointId" --output text)"
 
 vpcs="$(aws ec2 get-route-server-associations --route-server-id "$rs" \
     --query 'RouteServerAssociations[].VpcId' --output text 2>/dev/null || echo "")"
@@ -102,8 +104,7 @@ fi
 # these, which is why they may exist even though we never made any.
 for e in $endpoints; do
     peers="$(aws ec2 describe-route-server-peers \
-        --filters "Name=route-server-endpoint-id,Values=$e" \
-        --query 'RouteServerPeers[].RouteServerPeerId' --output text 2>/dev/null || echo "")"
+        --query "RouteServerPeers[?RouteServerEndpointId=='$e'].RouteServerPeerId" --output text)"
     for p in $peers; do
         echo "Deleting peer $p"
         run aws ec2 delete-route-server-peer --route-server-peer-id "$p"
@@ -119,8 +120,7 @@ if [ "$dry_run" = false ] && [ -n "$endpoints" ]; then
     echo "Waiting for endpoints to go away..."
     for i in $(seq 1 60); do
         left="$(aws ec2 describe-route-server-endpoints \
-            --filters "Name=route-server-id,Values=$rs" \
-            --query 'length(RouteServerEndpoints)' --output text 2>/dev/null || echo 0)"
+            --query "length(RouteServerEndpoints[?RouteServerId=='$rs'])" --output text 2>/dev/null || echo 0)"
         [ "$left" = "0" ] && break
         sleep 10
     done

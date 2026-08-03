@@ -144,9 +144,10 @@ for entry in $subnets; do
     subnet="${entry%%:*}"
     az="${entry#*:}"
 
+    # DescribeRouteServerEndpoints rejects route-server-id and
+    # subnet-id as filters, so select client-side instead.
     existing="$(aws ec2 describe-route-server-endpoints \
-        --filters "Name=route-server-id,Values=$rs" "Name=subnet-id,Values=$subnet" \
-        --query 'RouteServerEndpoints[0].RouteServerEndpointId' \
+        --query "RouteServerEndpoints[?RouteServerId=='$rs' && SubnetId=='$subnet'].RouteServerEndpointId | [0]" \
         --output text 2>/dev/null || echo None)"
 
     if [ "$existing" != "None" ] && [ -n "$existing" ]; then
@@ -170,15 +171,14 @@ fi
 echo "Waiting for endpoints to become available..."
 for i in $(seq 1 60); do
     pending="$(aws ec2 describe-route-server-endpoints \
-        --filters "Name=route-server-id,Values=$rs" \
-        --query "length(RouteServerEndpoints[?State!='available'])" --output text)"
+        --query "length(RouteServerEndpoints[?RouteServerId=='$rs' && State!='available'])" --output text)"
     [ "$pending" = "0" ] && break
     sleep 10
 done
 
+# The endpoint records carry no AvailabilityZone, only SubnetId.
 aws ec2 describe-route-server-endpoints \
-    --filters "Name=route-server-id,Values=$rs" \
-    --query 'RouteServerEndpoints[].[AvailabilityZone,RouteServerEndpointId,EniAddress,State]' \
+    --query "RouteServerEndpoints[?RouteServerId=='$rs'].[SubnetId,RouteServerEndpointId,EniAddress,State]" \
     --output table
 
 cat <<EOF

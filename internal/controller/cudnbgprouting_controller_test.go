@@ -368,3 +368,39 @@ func TestMapRAToRouting_UnmanagedRA(t *testing.T) {
 		t.Errorf("expected 0 requests for unmanaged RA, got %d", len(requests))
 	}
 }
+
+func TestRoutingReconcile_ConfiguredResyncInterval(t *testing.T) {
+	routing := newTestCUDNBgpRouting()
+	config := newReadyCUDNBgpConfig()
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "app1",
+			Labels: map[string]string{
+				LabelPrimaryUDN: "",
+				LabelCUDN:       "prod",
+			},
+		},
+	}
+
+	s := routingTestScheme()
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(routing, config, ns).
+		WithStatusSubresource(routing, config).
+		Build()
+
+	r := &CUDNBgpRoutingReconciler{Client: c, Scheme: s, ResyncInterval: 30 * time.Second}
+
+	_, _ = r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "prod"},
+	})
+
+	result, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "prod"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile error: %v", err)
+	}
+	if result.RequeueAfter != 30*time.Second {
+		t.Errorf("expected configured 30s resync requeue, got %v", result.RequeueAfter)
+	}
+}

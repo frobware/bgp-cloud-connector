@@ -64,10 +64,17 @@ make run                    # manager on your host, against the cluster
 
 ```
 export AWS_ACCOUNT=<12-digit-account-id>
+# or, keeping it out of your shell history:
+export AWS_ACCOUNT_PASS=rhat/aws/qe-account-id
+
 ../devenv/install-aws-saml  # once per machine
 ../devenv/aws-login         # every 12 hours
 export AWS_PROFILE=saml
 ```
+
+`AWS_ACCOUNT_PASS` names a `pass` entry whose first line is the
+account id. Neither the id nor the entry name is baked into any
+script here.
 
 A `CUDNBgpConfig` needs Route Servers to discover; the operator only
 peers against them. On a cluster the rosa-bgp Terraform did not

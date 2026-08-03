@@ -11,8 +11,11 @@
 #   export AWS_PROFILE=saml
 #
 # The account number comes from the environment rather than being
-# baked in, so it stays out of a public repository. Put AWS_ACCOUNT
-# in your shell profile and this takes no arguments.
+# baked in, so it stays out of a public repository. Set either of
+# these in your shell profile and this takes no arguments:
+#
+#   AWS_ACCOUNT=012345678901
+#   AWS_ACCOUNT_PASS=path/to/pass/entry    # first line is the id
 #
 # Sessions last twelve hours and the credentials file records no
 # expiry, so whether the current ones are any good is decided by
@@ -24,6 +27,18 @@
 set -euo pipefail
 
 account="${AWS_ACCOUNT:-}"
+
+# Fall back to pass, if you have told us which entry to read. The
+# entry name is not baked in for the same reason the account number
+# is not: it is nobody's business but yours.
+if [ -z "$account" ] && [ -n "${AWS_ACCOUNT_PASS:-}" ]; then
+    account="$(pass show "$AWS_ACCOUNT_PASS" 2>/dev/null | head -1 || true)"
+    if [ -z "$account" ]; then
+        echo "Error: could not read an account id from pass entry '$AWS_ACCOUNT_PASS'" >&2
+        exit 1
+    fi
+fi
+
 profile="${AWS_SAML_PROFILE:-saml}"
 role="${AWS_ROLE:-${account}-poweruser}"
 duration="${AWS_SESSION_DURATION:-43200}"
@@ -37,9 +52,11 @@ case "${1:-}" in
 esac
 
 if [ -z "$account" ]; then
-    echo "Error: AWS_ACCOUNT is not set" >&2
-    echo "Set it to the 12-digit account id you want to log in to:" >&2
+    echo "Error: no account id" >&2
+    echo "Set AWS_ACCOUNT to the 12-digit id, or AWS_ACCOUNT_PASS to a" >&2
+    echo "pass entry whose first line is the id:" >&2
     echo "  AWS_ACCOUNT=012345678901 ${0##*/}" >&2
+    echo "  AWS_ACCOUNT_PASS=rhat/aws/some-account ${0##*/}" >&2
     exit 1
 fi
 

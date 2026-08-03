@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+#
+# Tear down the route server infrastructure created by
+# create-route-servers.
+#
+# Route server endpoints bill hourly and are VPC resources, not
+# cluster ones, so they outlive the cluster that prompted them. A QE
+# cluster reaped after twelve hours leaves them behind, and its VPC
+# cannot be deleted while they are attached. Hence this.
+#
+#   ../devenv/delete-route-servers --dry-run
+#   ../devenv/delete-route-servers --yes
+#
+# Normally it identifies what to delete from the running cluster.
+# Once the cluster is gone there is nothing to ask, so name it:
+#
+#   INFRA=mycluster-abcde AWS_REGION=us-east-2 \
+#       ../devenv/delete-route-servers --yes
+#
+# Only ever touches the route server tagged <infra>-rs, so it cannot
+# take out somebody else's.
+
+set -euo pipefail
+
+dry_run=false
+assume_yes=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) dry_run=true ;;
+        --yes|-y) assume_yes=true ;;
+        *) echo "Usage: ${0##*/} [--dry-run] [--yes]" >&2; exit 1 ;;
+    esac
+done
+
+run() {
+    if [ "$dry_run" = true ]; then
+        echo "  would run: $*"
+        return 0
+    fi
+    "$@"
+}
+
+if ! aws sts get-caller-identity >/dev/null 2>&1; then
+    echo "Error: no usable AWS credentials" >&2
+    exit 1
+fi
+
+infra="${INFRA:-}"
+if [ -z "$infra" ]; then
+    if ! infra="$(oc get infrastructure cluster -o jsonpath='{.status.infrastructureName}' 2>/dev/null)" || [ -z "$infra" ]; then
+        echo "Error: no cluster reachable and INFRA is not set" >&2
+        echo "If the cluster is gone, name it: INFRA=<name> AWS_REGION=<region> ${0##*/}" >&2
+        exit 1
+    fi
+    : "${AWS_REGION:=$(oc get infrastructure cluster -o jsonpath='{.status.platformStatus.aws.region}')}"
+fi
+
+if [ -z "${AWS_REGION:-}" ]; then
+    echo "Error: AWS_REGION is not set and could not be read from a cluster" >&2
+    exit 1
+fi
+export AWS_REGION
+
+rs="$(aws ec2 describe-route-servers \
+    --filters "Name=tag:Name,Values=$infra-rs" \
+    --query 'RouteServers[0].RouteServerId' --output text 2>/dev/null || echo None)"
+
+if [ "$rs" = "None" ] || [ -z "$rs" ]; then
+    echo "Nothing to do: no route server tagged $infra-rs in $AWS_REGION"
+    exit 0
+fi
+
+echo "Region:       $AWS_REGION"
+echo "Cluster:      $infra"
+echo "Route server: $rs"
+echo
+
+endpoints="$(aws ec2 describe-route-server-endpoints \
+    --filters "Name=route-server-id,Values=$rs" \
+    --query 'RouteServerEndpoints[].RouteServerEndpointId' --output text)"
+
+vpcs="$(aws ec2 get-route-server-associations --route-server-id "$rs" \
+    --query 'RouteServerAssociations[].VpcId' --output text 2>/dev/null || echo "")"
+
+echo "Will delete:"
+for e in $endpoints; do echo "  endpoint $e"; done
+for v in $vpcs; do echo "  association with $v"; done
+echo "  route server $rs"
+echo
+
+if [ "$dry_run" = false ] && [ "$assume_yes" = false ]; then
+    printf "Type the cluster name to confirm: "
+    read -r reply
+    if [ "$reply" != "$infra" ]; then
+        echo "Aborted." >&2
+        exit 1
+    fi
+fi
+
+# Peers hold endpoints open, so they go first. The operator creates
+# these, which is why they may exist even though we never made any.
+for e in $endpoints; do
+    peers="$(aws ec2 describe-route-server-peers \
+        --filters "Name=route-server-endpoint-id,Values=$e" \
+        --query 'RouteServerPeers[].RouteServerPeerId' --output text 2>/dev/null || echo "")"
+    for p in $peers; do
+        echo "Deleting peer $p"
+        run aws ec2 delete-route-server-peer --route-server-peer-id "$p"
+    done
+done
+
+for e in $endpoints; do
+    echo "Deleting endpoint $e"
+    run aws ec2 delete-route-server-endpoint --route-server-endpoint-id "$e"
+done
+
+if [ "$dry_run" = false ] && [ -n "$endpoints" ]; then
+    echo "Waiting for endpoints to go away..."
+    for i in $(seq 1 60); do
+        left="$(aws ec2 describe-route-server-endpoints \
+            --filters "Name=route-server-id,Values=$rs" \
+            --query 'length(RouteServerEndpoints)' --output text 2>/dev/null || echo 0)"
+        [ "$left" = "0" ] && break
+        sleep 10
+    done
+fi
+
+for v in $vpcs; do
+    echo "Disassociating from $v"
+    run aws ec2 disassociate-route-server --route-server-id "$rs" --vpc-id "$v"
+done
+
+if [ "$dry_run" = false ] && [ -n "$vpcs" ]; then
+    echo "Waiting for associations to clear..."
+    for i in $(seq 1 60); do
+        left="$(aws ec2 get-route-server-associations --route-server-id "$rs" \
+            --query 'length(RouteServerAssociations)' --output text 2>/dev/null || echo 0)"
+        [ "$left" = "0" ] && break
+        sleep 10
+    done
+fi
+
+echo "Deleting route server $rs"
+run aws ec2 delete-route-server --route-server-id "$rs"
+
+echo
+if [ "$dry_run" = true ]; then
+    echo "Dry run only, nothing was deleted."
+else
+    echo "Done."
+fi

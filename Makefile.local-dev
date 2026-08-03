@@ -1,0 +1,34 @@
+# Local development helpers. Build the operator on the host, then
+# bake the binary into an image; nothing compiles inside the
+# container. Lives on the devenv branch, symlinked into sibling
+# worktrees.
+#
+# In a fresh worktree, seed the symlinks with ../devenv/link-worktree
+# first, then:
+#
+#   make -f Makefile.local-dev image
+#   make -f Makefile.local-dev run ARGS='--help'
+
+CONTAINER_TOOL ?= podman
+DEV_IMG ?= bgp-cloud-connector:dev
+CONTAINERFILE := Containerfile.bgp-cloud-connector.dev
+
+.PHONY: all build image run clean help
+
+all: image
+
+build: ## Build bin/manager on the host, statically linked.
+	CGO_ENABLED=0 go build -o bin/manager cmd/main.go
+
+image: build ## Copy bin/manager into a local image.
+	$(CONTAINER_TOOL) build -f $(CONTAINERFILE) --ignorefile $(CONTAINERFILE).dockerignore -t $(DEV_IMG) .
+
+run: ## Run the image. Usage: make -f Makefile.local-dev run ARGS='--help'
+	$(CONTAINER_TOOL) run --rm $(DEV_IMG) $(ARGS)
+
+clean: ## Remove the binary and the local image.
+	rm -f bin/manager
+	-$(CONTAINER_TOOL) rmi $(DEV_IMG)
+
+help: ## Display this help.
+	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-8s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)

@@ -1,0 +1,22 @@
+# Local development image. It copies a binary you have already built
+# on the host instead of compiling inside the container, so an
+# iteration costs a Go build plus a layer copy rather than a full
+# go-toolset compile over the whole tree.
+#
+#   make -f Makefile.local-dev image
+#
+# Build the binary with CGO_ENABLED=0: a cgo build on NixOS links
+# against a /nix/store glibc that ubi-minimal cannot provide, and the
+# copied binary would fail to exec. This image is therefore not
+# FIPS-capable; Containerfile.bgp-cloud-connector remains the real
+# build.
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+LABEL maintainer="Red Hat, Inc."
+LABEL com.redhat.component="bgp-cloud-connector-operator"
+LABEL name="bgp-cloud-connector/bgp-cloud-connector-operator"
+WORKDIR /
+COPY bin/manager /
+COPY LICENSE /licenses/
+USER 65532:65532
+ENTRYPOINT ["/manager"]

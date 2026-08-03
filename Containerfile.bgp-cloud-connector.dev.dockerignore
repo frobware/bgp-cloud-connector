@@ -1,0 +1,11 @@
+# The root .dockerignore excludes bin/, which is exactly what this
+# image needs to copy. Excluding everything and re-admitting the two
+# paths also keeps the build context to the binary alone rather than
+# the whole tree, vendor/ included.
+#
+# Buildkit picks up the <containerfile>.dockerignore convention
+# automatically; podman does not, so Makefile.local-dev passes
+# --ignorefile explicitly.
+*
+!bin/manager
+!LICENSE

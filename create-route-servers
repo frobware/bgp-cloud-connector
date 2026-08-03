@@ -12,8 +12,9 @@
 #   ../devenv/create-route-servers --dry-run
 #   ../devenv/create-route-servers
 #
-# Run it with AWS credentials in the environment, e.g. under
-#   aws-vault exec <profile> -- ../devenv/create-route-servers
+# Needs AWS credentials for the account owning the cluster, e.g.
+#   AWS_PROFILE=saml ../devenv/create-route-servers
+# where the saml profile comes from install-aws-saml.
 #
 # ASN sets the Amazon-side ASN and must differ from the localASN in
 # your CUDNBgpConfig. Route server endpoints bill hourly, so tear
@@ -48,7 +49,8 @@ fi
 
 if ! aws sts get-caller-identity >/dev/null 2>&1; then
     echo "Error: no usable AWS credentials" >&2
-    echo "Try: aws-vault exec <profile> -- ${0##*/}" >&2
+    echo "Select a profile, e.g. AWS_PROFILE=saml ${0##*/}" >&2
+    echo "Available: $(aws configure list-profiles 2>/dev/null | tr '\n' ' ')" >&2
     exit 1
 fi
 

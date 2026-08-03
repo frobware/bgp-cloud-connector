@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#
+# Mint temporary AWS credentials for a Red Hat account over SAML,
+# unless the ones you already have still work.
+#
+#   AWS_ACCOUNT=012345678901 ../devenv/aws-login
+#   AWS_ACCOUNT=012345678901 ../devenv/aws-login --force
+#
+# Then use them:
+#
+#   export AWS_PROFILE=saml
+#
+# The account number comes from the environment rather than being
+# baked in, so it stays out of a public repository. Put AWS_ACCOUNT
+# in your shell profile and this takes no arguments.
+#
+# Sessions last twelve hours and the credentials file records no
+# expiry, so whether the current ones are any good is decided by
+# calling sts and seeing what happens.
+#
+# Overrides: AWS_SAML_PROFILE (default saml), AWS_ROLE (default
+# <account>-poweruser), AWS_SESSION_DURATION (default 43200).
+
+set -euo pipefail
+
+account="${AWS_ACCOUNT:-}"
+profile="${AWS_SAML_PROFILE:-saml}"
+role="${AWS_ROLE:-${account}-poweruser}"
+duration="${AWS_SESSION_DURATION:-43200}"
+saml="${AWS_SAML:-$HOME/.venvs/aws-saml/bin/aws-saml.py}"
+force=false
+
+case "${1:-}" in
+    --force|-f) force=true ;;
+    "") ;;
+    *) echo "Usage: ${0##*/} [--force]" >&2; exit 1 ;;
+esac
+
+if [ -z "$account" ]; then
+    echo "Error: AWS_ACCOUNT is not set" >&2
+    echo "Set it to the 12-digit account id you want to log in to:" >&2
+    echo "  AWS_ACCOUNT=012345678901 ${0##*/}" >&2
+    exit 1
+fi
+
+identity() {
+    AWS_PROFILE="$profile" aws sts get-caller-identity \
+        --query '[Account,Arn]' --output text 2>/dev/null
+}
+
+if [ "$force" = false ]; then
+    if current="$(identity)"; then
+        set -- $current
+        if [ "${1:-}" = "$account" ]; then
+            echo "Already logged in to $account as ${2:-unknown}"
+            echo "Profile '$profile' is still valid. Use --force to renew."
+            exit 0
+        fi
+        echo "Profile '$profile' is valid but for account ${1:-unknown}, renewing..."
+    fi
+fi
+
+if [ ! -x "$saml" ]; then
+    echo "Error: aws-saml.py not found at $saml" >&2
+    echo "Run ../devenv/install-aws-saml first." >&2
+    exit 1
+fi
+
+if ! klist -s 2>/dev/null; then
+    echo "Error: no valid Kerberos ticket" >&2
+    echo "Run: kinit ${KRB_USER:-<your-kerberos-id>}@IPA.REDHAT.COM" >&2
+    exit 1
+fi
+
+echo "Minting credentials for $account as $role (${duration}s)..."
+
+"$saml" \
+    --target-account "$account" \
+    --target-role "$role" \
+    --target-profile "$profile" \
+    --session-duration "$duration"
+
+if ! current="$(identity)"; then
+    echo "Error: credentials were written but do not work" >&2
+    exit 1
+fi
+
+set -- $current
+echo
+echo "Logged in to $1 as $2"
+echo "Use it with: export AWS_PROFILE=$profile"

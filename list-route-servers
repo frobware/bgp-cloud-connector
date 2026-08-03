@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# Show every route server in a region, with its endpoints, VPC
+# associations and peers.
+#
+#   ../devenv/list-route-servers
+#   AWS_REGION=us-west-2 ../devenv/list-route-servers
+#
+# Deliberately account-wide rather than scoped to your cluster. These
+# are VPC resources that outlive the clusters they were made for, and
+# they bill by the hour, so the useful question is "what is running
+# here that nobody owns any more" rather than "what did I make".
+# Anything whose VPC has gone is flagged as orphaned.
+#
+# Read-only.
+
+set -euo pipefail
+
+if ! aws sts get-caller-identity >/dev/null 2>&1; then
+    echo "Error: no usable AWS credentials" >&2
+    exit 1
+fi
+
+if [ -z "${AWS_REGION:-}" ]; then
+    AWS_REGION="$(oc get infrastructure cluster -o jsonpath='{.status.platformStatus.aws.region}' 2>/dev/null || true)"
+fi
+if [ -z "$AWS_REGION" ]; then
+    echo "Error: set AWS_REGION, or connect to a cluster to borrow its region" >&2
+    exit 1
+fi
+export AWS_REGION
+
+# Empty if no cluster is reachable, which is fine; it only decides
+# whether a route server gets flagged as this cluster's.
+mine="$(oc get infrastructure cluster -o jsonpath='{.status.infrastructureName}' 2>/dev/null || true)"
+
+echo "Region:  $AWS_REGION"
+echo "Account: $(aws sts get-caller-identity --query Account --output text)"
+echo
+
+servers="$(aws ec2 describe-route-servers --query 'RouteServers[].RouteServerId' --output text)"
+
+if [ -z "$servers" ]; then
+    echo "No route servers."
+    exit 0
+fi
+
+for rs in $servers; do
+    read -r asn state name <<<"$(aws ec2 describe-route-servers \
+        --route-server-ids "$rs" \
+        --query "RouteServers[0].[AmazonSideAsn,State,Tags[?Key=='Name']|[0].Value]" \
+        --output text)"
+
+    marker=""
+    if [ -n "$mine" ] && [ "$name" = "$mine-rs" ]; then
+        marker="   <- this cluster"
+    fi
+
+    echo "$rs  asn=$asn  state=$state  name=${name:-<untagged>}$marker"
+
+    vpcs="$(aws ec2 get-route-server-associations --route-server-id "$rs" \
+        --query 'RouteServerAssociations[].VpcId' --output text 2>/dev/null || true)"
+
+    if [ -z "$vpcs" ]; then
+        echo "    associations: none"
+    fi
+    for v in $vpcs; do
+        if aws ec2 describe-vpcs --vpc-ids "$v" >/dev/null 2>&1; then
+            echo "    vpc $v"
+        else
+            echo "    vpc $v  (GONE - orphaned)"
+        fi
+    done
+
+    endpoints="$(aws ec2 describe-route-server-endpoints \
+        --query "RouteServerEndpoints[?RouteServerId=='$rs'].RouteServerEndpointId" \
+        --output text)"
+
+    if [ -z "$endpoints" ]; then
+        echo "    endpoints: none"
+    fi
+    for e in $endpoints; do
+        read -r subnet eni est <<<"$(aws ec2 describe-route-server-endpoints \
+            --route-server-endpoint-ids "$e" \
+            --query 'RouteServerEndpoints[0].[SubnetId,EniAddress,State]' --output text)"
+        echo "    endpoint $e  $subnet  $eni  $est"
+
+        peers="$(aws ec2 describe-route-server-peers \
+            --query "RouteServerPeers[?RouteServerEndpointId=='$e'].[RouteServerPeerId,PeerAddress,State]" \
+            --output text || true)"
+        while read -r pid paddr pstate; do
+            [ -n "$pid" ] || continue
+            echo "      peer $pid  $paddr  $pstate"
+        done <<<"$peers"
+    done
+    echo
+done

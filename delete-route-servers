@@ -64,9 +64,13 @@ if [ -z "${AWS_REGION:-}" ]; then
 fi
 export AWS_REGION
 
+# Tag filter server-side, state filter client-side: a deleted route
+# server keeps its tag and keeps being returned, so selecting on the tag
+# alone offers to delete something AWS removed hours ago.
 rs="$(aws ec2 describe-route-servers \
     --filters "Name=tag:Name,Values=$infra-rs" \
-    --query 'RouteServers[0].RouteServerId' --output text 2>/dev/null || echo None)"
+    --query "RouteServers[?State!='deleted' && State!='deleting'].RouteServerId | [0]" \
+    --output text 2>/dev/null || echo None)"
 
 if [ "$rs" = "None" ] || [ -z "$rs" ]; then
     echo "Nothing to do: no route server tagged $infra-rs in $AWS_REGION"

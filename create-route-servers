@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+#
+# Create the AWS VPC Route Server infrastructure that CUDNBgpConfig
+# expects to discover, for a cluster that was not built by the
+# rosa-bgp Terraform.
+#
+# The operator discovers route servers and endpoints; it never
+# creates them. It creates only the peers, and flips SourceDestCheck
+# on the router nodes. So this fills the gap: one route server, one
+# endpoint per availability zone, associated with the cluster's VPC.
+#
+#   ../devenv/create-route-servers --dry-run
+#   ../devenv/create-route-servers
+#
+# Run it with AWS credentials in the environment, e.g. under
+#   aws-vault exec <profile> -- ../devenv/create-route-servers
+#
+# ASN sets the Amazon-side ASN and must differ from the localASN in
+# your CUDNBgpConfig. Route server endpoints bill hourly, so tear
+# them down when you are finished.
+#
+# Rerunning adopts what already exists rather than creating a second
+# set, so it is safe as a check on the current state.
+
+set -euo pipefail
+
+asn="${ASN:-65000}"
+dry_run=false
+
+case "${1:-}" in
+    --dry-run) dry_run=true ;;
+    "") ;;
+    *) echo "Usage: ${0##*/} [--dry-run]" >&2; exit 1 ;;
+esac
+
+run() {
+    if [ "$dry_run" = true ]; then
+        echo "  would run: $*"
+        return 0
+    fi
+    "$@"
+}
+
+if ! oc whoami >/dev/null 2>&1; then
+    echo "Error: not connected to a cluster" >&2
+    exit 1
+fi
+
+if ! aws sts get-caller-identity >/dev/null 2>&1; then
+    echo "Error: no usable AWS credentials" >&2
+    echo "Try: aws-vault exec <profile> -- ${0##*/}" >&2
+    exit 1
+fi
+
+infra="$(oc get infrastructure cluster -o jsonpath='{.status.infrastructureName}')"
+region="$(oc get infrastructure cluster -o jsonpath='{.status.platformStatus.aws.region}')"
+export AWS_REGION="$region"
+
+if [ -z "$infra" ] || [ -z "$region" ]; then
+    echo "Error: could not determine cluster infrastructure name or region" >&2
+    exit 1
+fi
+
+# describe-route-servers fails outright where the feature is absent,
+# which is a clearer failure than a create call half way through.
+if ! aws ec2 describe-route-servers >/dev/null 2>&1; then
+    echo "Error: VPC Route Server API unavailable in $region for this account" >&2
+    exit 1
+fi
+
+vpc="$(aws ec2 describe-vpcs \
+    --filters "Name=tag:kubernetes.io/cluster/$infra,Values=owned" \
+    --query 'Vpcs[0].VpcId' --output text)"
+
+if [ "$vpc" = "None" ] || [ -z "$vpc" ]; then
+    echo "Error: no VPC tagged kubernetes.io/cluster/$infra=owned" >&2
+    exit 1
+fi
+
+echo "Cluster:  $infra"
+echo "Region:   $region"
+echo "VPC:      $vpc"
+echo "Amazon-side ASN: $asn"
+echo
+
+# One endpoint per AZ, so take the first private subnet in each.
+subnets=""
+seen_azs=""
+while read -r subnet az; do
+    [ -n "$subnet" ] || continue
+    case " $seen_azs " in *" $az "*) continue ;; esac
+    seen_azs="$seen_azs $az"
+    subnets="$subnets $subnet:$az"
+done < <(aws ec2 describe-subnets \
+    --filters "Name=vpc-id,Values=$vpc" "Name=tag:Name,Values=*private*" \
+    --query 'Subnets[].[SubnetId,AvailabilityZone]' --output text | sort -k2)
+
+if [ -z "$subnets" ]; then
+    echo "Error: no private subnets found in $vpc" >&2
+    exit 1
+fi
+
+echo "Private subnets, one per AZ:"
+for entry in $subnets; do
+    echo "  ${entry#*:}  ${entry%%:*}"
+done
+echo
+
+rs="$(aws ec2 describe-route-servers \
+    --filters "Name=tag:Name,Values=$infra-rs" \
+    --query 'RouteServers[0].RouteServerId' --output text 2>/dev/null || echo None)"
+
+if [ "$rs" != "None" ] && [ -n "$rs" ]; then
+    echo "Adopting existing route server $rs"
+else
+    echo "Creating route server..."
+    if [ "$dry_run" = true ]; then
+        echo "  would run: aws ec2 create-route-server --amazon-side-asn $asn --tag-specifications ResourceType=route-server,Tags=[{Key=Name,Value=$infra-rs}]"
+        rs="rs-DRYRUN"
+    else
+        rs="$(aws ec2 create-route-server \
+            --amazon-side-asn "$asn" \
+            --tag-specifications "ResourceType=route-server,Tags=[{Key=Name,Value=$infra-rs}]" \
+            --query 'RouteServer.RouteServerId' --output text)"
+        echo "  created $rs"
+        aws ec2 wait route-server-available --route-server-ids "$rs" 2>/dev/null || true
+    fi
+fi
+
+associated="$(aws ec2 get-route-server-associations \
+    --route-server-id "$rs" \
+    --query "RouteServerAssociations[?VpcId=='$vpc'].VpcId" \
+    --output text 2>/dev/null || echo "")"
+
+if [ -n "$associated" ] && [ "$associated" != "None" ]; then
+    echo "Already associated with $vpc"
+else
+    echo "Associating $rs with $vpc..."
+    run aws ec2 associate-route-server --route-server-id "$rs" --vpc-id "$vpc"
+fi
+echo
+
+for entry in $subnets; do
+    subnet="${entry%%:*}"
+    az="${entry#*:}"
+
+    existing="$(aws ec2 describe-route-server-endpoints \
+        --filters "Name=route-server-id,Values=$rs" "Name=subnet-id,Values=$subnet" \
+        --query 'RouteServerEndpoints[0].RouteServerEndpointId' \
+        --output text 2>/dev/null || echo None)"
+
+    if [ "$existing" != "None" ] && [ -n "$existing" ]; then
+        echo "$az: endpoint $existing already exists"
+        continue
+    fi
+
+    echo "$az: creating endpoint in $subnet..."
+    run aws ec2 create-route-server-endpoint \
+        --route-server-id "$rs" \
+        --subnet-id "$subnet" \
+        --tag-specifications "ResourceType=route-server-endpoint,Tags=[{Key=Name,Value=$infra-rs-$az}]"
+done
+
+echo
+if [ "$dry_run" = true ]; then
+    echo "Dry run only, nothing was created."
+    exit 0
+fi
+
+echo "Waiting for endpoints to become available..."
+for i in $(seq 1 60); do
+    pending="$(aws ec2 describe-route-server-endpoints \
+        --filters "Name=route-server-id,Values=$rs" \
+        --query "length(RouteServerEndpoints[?State!='available'])" --output text)"
+    [ "$pending" = "0" ] && break
+    sleep 10
+done
+
+aws ec2 describe-route-server-endpoints \
+    --filters "Name=route-server-id,Values=$rs" \
+    --query 'RouteServerEndpoints[].[AvailabilityZone,RouteServerEndpointId,EniAddress,State]' \
+    --output table
+
+cat <<EOF
+
+Put this in your CUDNBgpConfig:
+
+  spec:
+    aws:
+      region: $region
+      routeServerIDs:
+        - $rs
+
+Still needed before the operator can reconcile: label the router
+nodes with the key your spec.routerNodeSelector uses, e.g.
+
+  oc label node <node> bgp_router=true
+EOF

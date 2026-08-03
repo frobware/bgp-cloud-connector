@@ -32,6 +32,7 @@ flake and one lock file.
 | `install-aws-saml` | Creates `~/.venvs/aws-saml` and installs Red Hat's `aws-saml.py` |
 | `aws-login` | Mints 12-hour AWS credentials into the `saml` profile, skips if still valid |
 | `enable-frr` | Turns on FRR and route advertisements, waits for the rollout |
+| `disable-frr` | Takes them off again, refusing while a CUDNBgpConfig would undo it |
 | `create-route-servers` | Creates the AWS Route Servers the operator expects to discover |
 | `list-route-servers` | Shows every route server in a region, flagging orphans |
 | `delete-route-servers` | Tears them down again |

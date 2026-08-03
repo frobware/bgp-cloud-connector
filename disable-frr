@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+#
+# Undo enable-frr: take FRR and route advertisements back off the
+# cluster's Network CR.
+#
+#   ../devenv/disable-frr --dry-run
+#   ../devenv/disable-frr
+#
+# This is the counterpart to enable-frr, and it is the less well
+# understood direction. Enabling was observed to complete cleanly;
+# disabling has not been. OVN-Kubernetes may or may not unwind the
+# advertisement state, and CNO has to tear down the frr-k8s daemonset
+# rather than stand it up. Treat it as a change that needs watching, not
+# a tidy-up you run and walk away from.
+#
+# It refuses while a CUDNBgpConfig exists, because the operator patches
+# the Network CR straight back during reconcile and you would be
+# undoing this every thirty seconds without seeing why.
+
+set -euo pipefail
+
+timeout_secs="${TIMEOUT:-900}"
+dry_run=false
+assume_yes=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) dry_run=true ;;
+        --yes|-y) assume_yes=true ;;
+        *) echo "Usage: ${0##*/} [--dry-run] [--yes]" >&2; exit 1 ;;
+    esac
+done
+
+patch='{"spec":{"additionalRoutingCapabilities":null,"defaultNetwork":{"ovnKubernetesConfig":{"routeAdvertisements":"Disabled"}}}}'
+
+if ! oc whoami >/dev/null 2>&1; then
+    echo "Error: not connected to a cluster" >&2
+    exit 1
+fi
+
+configs="$(oc get cudnbgpconfig -o name 2>/dev/null | wc -l)"
+if [ "$configs" != "0" ]; then
+    echo "Error: $configs CUDNBgpConfig still exists" >&2
+    echo "The operator re-applies the FRR patch on every reconcile, so this" >&2
+    echo "would be undone immediately. Delete the CR first." >&2
+    exit 1
+fi
+
+ras="$(oc get routeadvertisements.k8s.ovn.org -o name 2>/dev/null | wc -l)"
+if [ "$ras" != "0" ]; then
+    echo "Error: $ras RouteAdvertisements still exist" >&2
+    echo "Remove them before disabling the feature that serves them." >&2
+    exit 1
+fi
+
+echo "Cluster: $(oc whoami --show-server)"
+echo
+echo "Current:"
+echo "  additionalRoutingCapabilities: $(oc get network.operator.openshift.io cluster -o jsonpath='{.spec.additionalRoutingCapabilities}')"
+echo "  routeAdvertisements:           $(oc get network.operator.openshift.io cluster -o jsonpath='{.spec.defaultNetwork.ovnKubernetesConfig.routeAdvertisements}')"
+echo
+echo "This rolls out OVN-Kubernetes across the cluster and removes the"
+echo "frr-k8s daemonset."
+echo
+
+if [ "$dry_run" = true ]; then
+    echo "would run: oc patch network.operator.openshift.io cluster --type=merge -p '$patch'"
+    echo
+    echo "Dry run only, nothing was changed."
+    exit 0
+fi
+
+if [ "$assume_yes" = false ]; then
+    printf "Type 'disable' to confirm: "
+    read -r reply
+    [ "$reply" = "disable" ] || { echo "Aborted." >&2; exit 1; }
+fi
+
+oc patch network.operator.openshift.io cluster --type=merge -p "$patch"
+
+echo
+echo "Waiting for the network rollout (up to ${timeout_secs}s)..."
+
+deadline=$((SECONDS + timeout_secs))
+while [ "$SECONDS" -lt "$deadline" ]; do
+    progressing="$(oc get co network -o jsonpath='{.status.conditions[?(@.type=="Progressing")].status}' 2>/dev/null || true)"
+    degraded="$(oc get co network -o jsonpath='{.status.conditions[?(@.type=="Degraded")].status}' 2>/dev/null || true)"
+
+    if [ "$degraded" = "True" ]; then
+        echo "Error: co/network went Degraded" >&2
+        oc get co network >&2
+        exit 1
+    fi
+
+    if [ "$progressing" = "False" ]; then
+        echo
+        oc get co network
+        echo
+        echo "frr-k8s namespace: $(oc get ns openshift-frr-k8s -o jsonpath='{.status.phase}' 2>/dev/null || echo gone)"
+        echo
+        echo "Done. The frrk8s and RouteAdvertisements CRDs may remain; CNO"
+        echo "owns those and this does not remove them."
+        exit 0
+    fi
+
+    sleep 10
+done
+
+echo "Error: timed out after ${timeout_secs}s" >&2
+oc get co network >&2
+exit 1

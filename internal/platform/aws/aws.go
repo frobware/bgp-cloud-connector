@@ -72,7 +72,7 @@ func newPlatform(ctx context.Context, cfg Config, ec2Override ec2API, stsOverrid
 	}
 
 	if _, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err != nil {
-		return nil, &CredentialError{Msg: fmt.Sprintf("AWS credential verification failed (sts:GetCallerIdentity): %v", err)}
+		return nil, &platform.CredentialError{Msg: fmt.Sprintf("AWS credential verification failed (sts:GetCallerIdentity): %v", err)}
 	}
 
 	return &Platform{
@@ -83,14 +83,6 @@ func newPlatform(ctx context.Context, cfg Config, ec2Override ec2API, stsOverrid
 		livenessDetection: cfg.LivenessDetection,
 		clusterID:         cfg.ClusterID,
 	}, nil
-}
-
-type CredentialError struct {
-	Msg string
-}
-
-func (e *CredentialError) Error() string {
-	return e.Msg
 }
 
 func (p *Platform) ReconcileNodes(ctx context.Context, nodes []platform.RouterNode) error {

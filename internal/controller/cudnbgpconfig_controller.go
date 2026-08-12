@@ -152,7 +152,7 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		p, err := buildPlatform(ctx, r.Client, config)
 		if err != nil {
-			var credErr *awsplatform.CredentialError
+			var credErr *platform.CredentialError
 			if errors.As(err, &credErr) {
 				return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionAWSEndpointsDiscovered,
 					"AWSCredentialsInvalid", credErr.Error())

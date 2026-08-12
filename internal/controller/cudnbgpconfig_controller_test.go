@@ -34,7 +34,6 @@ import (
 
 	networkingv1alpha1 "github.com/openshift/bgp-cloud-connector/api/v1alpha1"
 	"github.com/openshift/bgp-cloud-connector/internal/platform"
-	awsplatform "github.com/openshift/bgp-cloud-connector/internal/platform/aws"
 )
 
 func configTestScheme() *runtime.Scheme {
@@ -387,7 +386,7 @@ func TestConfigReconcile_AWSCredentialFailure(t *testing.T) {
 	r := &CUDNBgpConfigReconciler{
 		Client: c, Scheme: s,
 		PlatformBuilder: func(_ context.Context, _ client.Client, _ *networkingv1alpha1.CUDNBgpConfig) (platform.CloudPlatform, error) {
-			return nil, &awsplatform.CredentialError{Msg: "invalid credentials"}
+			return nil, &platform.CredentialError{Msg: "invalid credentials"}
 		},
 	}
 
@@ -606,7 +605,7 @@ func TestConfigReconcile_DeleteSucceedsWithCredentialFailure(t *testing.T) {
 	r := &CUDNBgpConfigReconciler{
 		Client: c, Scheme: s,
 		PlatformBuilder: func(_ context.Context, _ client.Client, _ *networkingv1alpha1.CUDNBgpConfig) (platform.CloudPlatform, error) {
-			return nil, &awsplatform.CredentialError{Msg: "invalid credentials"}
+			return nil, &platform.CredentialError{Msg: "invalid credentials"}
 		},
 	}
 

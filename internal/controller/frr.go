@@ -189,6 +189,18 @@ func ensureSingleFRRConfiguration(
 		},
 	}
 
+	// A platform may need FRR directives the structured neighbour API cannot
+	// express. They are merged at a lower precedence than the generated
+	// configuration above.
+	if group.RawFRRConfig != "" {
+		if err := unstructured.SetNestedMap(obj.Object, map[string]interface{}{
+			"priority":  int64(RawFRRConfigPriority),
+			"rawConfig": group.RawFRRConfig,
+		}, "spec", "raw"); err != nil {
+			return fmt.Errorf("setting spec.raw: %w", err)
+		}
+	}
+
 	return createOrUpdate(ctx, c, obj)
 }
 

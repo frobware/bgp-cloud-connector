@@ -213,6 +213,33 @@ func TestGoldenFRRFromDiscovery(t *testing.T) {
 	assertGolden(t, "frr-from-discovery.json", dumpFRRConfigurations(t, ctx, c))
 }
 
+// TestGoldenFRRRawConfig pins that a peer group carrying raw FRR directives
+// emits them as spec.raw. GCP needs disable-connected-check, which the
+// structured neighbour API cannot express.
+func TestGoldenFRRRawConfig(t *testing.T) {
+	ctx := context.Background()
+	c := frrTestClient(t)
+
+	config := goldenConfig(networkingv1alpha1.LivenessDetectionBGPKeepalive)
+	groups := []platform.PeerGroup{
+		{
+			Key: "cloud-router",
+			Neighbors: []platform.DiscoveredNeighbor{
+				{Address: "10.0.1.2", ASN: 64512},
+				{Address: "10.0.1.3", ASN: 64512},
+			},
+			RawFRRConfig: "      router bgp 65001\n" +
+				"       neighbor 10.0.1.2 disable-connected-check\n" +
+				"       neighbor 10.0.1.3 disable-connected-check\n",
+		},
+	}
+
+	if _, err := EnsureFRRConfigurationsFromGroups(ctx, c, config, groups); err != nil {
+		t.Fatalf("EnsureFRRConfigurationsFromGroups: %v", err)
+	}
+	assertGolden(t, "frr-raw-config.json", dumpFRRConfigurations(t, ctx, c))
+}
+
 // TestGoldenFRRPrunesStale pins the pruning behaviour: a configuration that is
 // no longer expected must be deleted on the next pass.
 func TestGoldenFRRPrunesStale(t *testing.T) {

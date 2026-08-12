@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,6 +61,7 @@ import (
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=infrastructures,verbs=get
 // +kubebuilder:rbac:groups=machine.openshift.io,resources=machines,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 type PlatformBuilderFunc func(ctx context.Context, c client.Client, config *networkingv1alpha1.CUDNBgpConfig) (platform.CloudPlatform, error)
 
@@ -67,6 +69,9 @@ type CUDNBgpConfigReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
 	PlatformBuilder PlatformBuilderFunc
+	// Recorder announces condition changes. Nil is tolerated so a unit test
+	// that does not care about events need not supply one.
+	Recorder record.EventRecorder
 }
 
 func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

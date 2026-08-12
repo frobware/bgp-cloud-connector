@@ -302,6 +302,8 @@ func defaultPlatformBuilder(ctx context.Context, c client.Client, config *networ
 	switch config.Spec.Platform {
 	case networkingv1alpha1.PlatformAWS:
 		return buildAWSPlatform(ctx, c, config)
+	case networkingv1alpha1.PlatformGCP:
+		return buildGCPPlatform(ctx, c, config)
 	default:
 		return nil, fmt.Errorf("no platform implementation for %q", config.Spec.Platform)
 	}

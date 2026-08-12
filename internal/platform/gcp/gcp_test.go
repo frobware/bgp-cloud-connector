@@ -22,6 +22,9 @@ type fakeCompute struct {
 	peersASN    int64
 	peersCalled bool
 	clearCalled bool
+
+	bgpFirewall bool
+	firewallErr error
 }
 
 func (f *fakeCompute) EnsureCanIPForward(_ context.Context, node RouterNode) (bool, error) {
@@ -51,6 +54,10 @@ func (f *fakeCompute) ReconcilePeers(_ context.Context, _, _ string, nodes []Rou
 func (f *fakeCompute) ClearPeers(_ context.Context, _, _ string) (bool, error) {
 	f.clearCalled = true
 	return true, nil
+}
+
+func (f *fakeCompute) HasBGPFirewallRule(_ context.Context, _ []string) (bool, error) {
+	return f.bgpFirewall, f.firewallErr
 }
 
 type fakeNCC struct {
@@ -335,5 +342,57 @@ func TestPlatformSatisfiesInterfaces(t *testing.T) {
 	}
 	if _, ok := p.(platform.NodeLifecycle); !ok {
 		t.Error("Platform does not implement platform.NodeLifecycle")
+	}
+}
+
+// --- Prerequisites ---
+
+// TestCheckPrerequisites_NoFirewall covers the failure that says nothing: GCP
+// denies ingress by default and the installer never opens 179, so FRR sits in
+// Active and the Cloud Router in Connect with neither explaining why.
+func TestCheckPrerequisites_NoFirewall(t *testing.T) {
+	compute := &fakeCompute{
+		topology:    &CloudRouterTopology{ASN: 64512, InterfaceNames: []string{"if-0"}, InterfaceIPs: []string{"10.0.128.5"}},
+		bgpFirewall: false,
+	}
+	p := NewWithClients(testConfig(), compute, &fakeNCC{}, nil)
+
+	unmet, err := p.CheckPrerequisites(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(unmet) != 1 || !strings.Contains(unmet[0], "TCP 179") {
+		t.Fatalf("expected a firewall complaint, got %v", unmet)
+	}
+}
+
+// TestCheckPrerequisites_NATRouter is the installer's Cloud NAT router: no
+// interfaces, no ASN, and the resource the cluster's egress depends on.
+func TestCheckPrerequisites_NATRouter(t *testing.T) {
+	compute := &fakeCompute{topology: &CloudRouterTopology{}, bgpFirewall: true}
+	p := NewWithClients(testConfig(), compute, &fakeNCC{}, nil)
+
+	unmet, err := p.CheckPrerequisites(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(unmet) != 2 {
+		t.Fatalf("expected complaints about interfaces and ASN, got %v", unmet)
+	}
+}
+
+func TestCheckPrerequisites_Satisfied(t *testing.T) {
+	compute := &fakeCompute{
+		topology:    &CloudRouterTopology{ASN: 64512, InterfaceNames: []string{"if-0"}, InterfaceIPs: []string{"10.0.128.5"}},
+		bgpFirewall: true,
+	}
+	p := NewWithClients(testConfig(), compute, &fakeNCC{}, nil)
+
+	unmet, err := p.CheckPrerequisites(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(unmet) != 0 {
+		t.Errorf("expected nothing unmet, got %v", unmet)
 	}
 }

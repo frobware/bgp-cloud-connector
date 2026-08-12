@@ -3,7 +3,9 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -299,4 +301,109 @@ func (a peerSet) equal(b peerSet) bool {
 		}
 	}
 	return true
+}
+
+// HasBGPFirewallRule reports whether some enabled ingress rule admits TCP 179
+// from every Cloud Router interface address.
+//
+// This deliberately does not attempt to model GCP firewall evaluation in full:
+// target tags, service accounts and priority ordering all matter, and getting
+// that subtly wrong would be worse than not checking. It answers the question
+// that is actually useful, which is whether anybody has opened BGP at all,
+// because the overwhelmingly common case is that nothing has.
+func (c *computeClient) HasBGPFirewallRule(ctx context.Context, interfaceIPs []string) (bool, error) {
+	if len(interfaceIPs) == 0 {
+		return false, nil
+	}
+
+	list, err := c.svc.Firewalls.List(c.project).Context(ctx).Do()
+	if err != nil {
+		return false, err
+	}
+
+	for _, fw := range list.Items {
+		if fw == nil || fw.Disabled || !strings.EqualFold(fw.Direction, "INGRESS") {
+			continue
+		}
+		if !allowsBGP(fw.Allowed) {
+			continue
+		}
+		if coversAll(fw.SourceRanges, interfaceIPs) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func allowsBGP(allowed []*compute.FirewallAllowed) bool {
+	for _, a := range allowed {
+		if a == nil {
+			continue
+		}
+		proto := strings.ToLower(a.IPProtocol)
+		if proto == "all" {
+			return true
+		}
+		if proto != "tcp" {
+			continue
+		}
+		// An empty port list on tcp means every port.
+		if len(a.Ports) == 0 {
+			return true
+		}
+		for _, p := range a.Ports {
+			if portRangeCovers(p, 179) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func portRangeCovers(spec string, port int) bool {
+	lo, hi, found := strings.Cut(spec, "-")
+	low, err := strconv.Atoi(strings.TrimSpace(lo))
+	if err != nil {
+		return false
+	}
+	if !found {
+		return low == port
+	}
+	high, err := strconv.Atoi(strings.TrimSpace(hi))
+	if err != nil {
+		return false
+	}
+	return port >= low && port <= high
+}
+
+// coversAll reports whether every address is inside one of the source ranges.
+func coversAll(sourceRanges, addresses []string) bool {
+	for _, addr := range addresses {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			return false
+		}
+		covered := false
+		for _, r := range sourceRanges {
+			if rangeContains(r, ip) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return false
+		}
+	}
+	return true
+}
+
+func rangeContains(sourceRange string, ip net.IP) bool {
+	if !strings.Contains(sourceRange, "/") {
+		return net.ParseIP(sourceRange).Equal(ip)
+	}
+	_, cidr, err := net.ParseCIDR(sourceRange)
+	if err != nil {
+		return false
+	}
+	return cidr.Contains(ip)
 }

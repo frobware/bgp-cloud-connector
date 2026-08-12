@@ -28,6 +28,9 @@ type ComputeClient interface {
 	GetRouterTopology(ctx context.Context, routerName string) (*CloudRouterTopology, error)
 	ReconcilePeers(ctx context.Context, routerName, clusterID string, nodes []RouterNode, topology *CloudRouterTopology, localASN int64) (changed bool, err error)
 	ClearPeers(ctx context.Context, routerName, clusterID string) (changed bool, err error)
+	// HasBGPFirewallRule reports whether an enabled ingress rule admits TCP
+	// 179 from the given Cloud Router interface addresses.
+	HasBGPFirewallRule(ctx context.Context, interfaceIPs []string) (bool, error)
 }
 
 // NCCClient abstracts Network Connectivity Center spoke operations.

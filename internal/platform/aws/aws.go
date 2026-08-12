@@ -25,6 +25,7 @@ type ec2API interface {
 	CreateTags(ctx context.Context, input *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
 	DescribeInstances(ctx context.Context, input *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
 	ModifyNetworkInterfaceAttribute(ctx context.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, optFns ...func(*ec2.Options)) (*ec2.ModifyNetworkInterfaceAttributeOutput, error)
+	GetRouteServerPropagations(ctx context.Context, input *ec2.GetRouteServerPropagationsInput, optFns ...func(*ec2.Options)) (*ec2.GetRouteServerPropagationsOutput, error)
 }
 
 type stsAPI interface {

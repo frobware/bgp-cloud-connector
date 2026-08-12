@@ -92,10 +92,14 @@ used only to populate `status`.
 
 ### 2. FRR granularity, and whether GCP needs per-node configurations
 
-**Taken provisionally: one peer group.** The implementation emits a single
-group covering all router nodes. It rests on the code reading below and has
-not been watched converging on a live cluster, so it is the first thing to
-check when GCP is exercised end to end.
+**Settled: one peer group.** Driving GCP through the explicit
+`spec.bgp.availabilityZones` path by hand produced exactly one
+`FRRConfiguration`, not one per zone, and the sessions came up. A GCP subnet is
+regional, there is one Cloud Router for the region, and every node peers with
+the same interface addresses, so the zone axis has nothing to partition. The
+per-node configurations the rh-mobb operator writes are defensive rather than
+required: their own note puts a single broad CR at 60% confidence and keeps
+per-node for isolation from merge conflicts.
 
 Here, one `FRRConfiguration` is generated per AZ. On GCP one is generated per
 node, selecting on `kubernetes.io/hostname`.
@@ -278,11 +282,22 @@ Each stage is independently reviewable and leaves the tree green. Stages 1 to
    `NodeLifecycle`, with fake clients mirroring `aws_test.go`.
    Verify: unit tests against fakes; no live cluster needed.
 
-   Implemented. It resolves GCE identity from the node's `gce://` provider ID
-   rather than widening `platform.RouterNode`, emits a single peer group per
-   decision 2, and carries `disable-connected-check` in `RawFRRConfig`.
-   `spec.gcp` and the `GCP` enum value land with it, so an unimplemented
-   cloud is still rejected at admission.
+   Implemented and verified against live GCP on an OCP 4.22.8 cluster with
+   three router nodes. `ReconcileNodes` set `canIpForward` on all three
+   instances, created one NCC spoke naming them at the right addresses, and
+   wrote six Cloud Router peers, two per node across the redundant interface
+   pair, at the configured ASN. A second pass reported no change, so
+   reconciliation converges rather than fighting itself each resync.
+   Discovery against the real Cloud Router returned one peer group with both
+   interface addresses stripped of their mask and the
+   `disable-connected-check` block.
+
+   It resolves GCE identity from the node's `gce://` provider ID rather than
+   widening `platform.RouterNode`. Every provider ID on a real cluster parses
+   and resolves to the matching instance. The `preTerminate` merge patch was
+   exercised against a real apiserver, where it is idempotent and leaves
+   another operator's hooks on the same Machine untouched -- neither of which
+   the fake client can demonstrate.
 5. GCP e2e, modelled on `test/e2e/aws`.
    Verify: against a live OSD/GCP cluster.
 
@@ -294,13 +309,35 @@ a third special case.
 Stages 1 to 3 are mechanical and need no GCP knowledge. Stage 4 is where the
 decisions above start to matter, so they need answering before it starts.
 
+## Known limits
+
+**Spoke sharding may conflict with Google's ASN rule.** An NCC spoke takes at
+most 8 router appliance instances, so `chunkRouterNodes` shards across
+`{prefix}-0`, `{prefix}-1` and so on. Google's ASN requirements state that
+different spokes must use different ASNs, while every router node here
+advertises one cluster-wide ASN taken from `spec.bgp.localASN`. Two readings:
+the rule is scoped to site-to-site data transfer and does not bind, or it
+binds and nothing has yet crossed 8 router nodes to find out. The
+configuration that would surface it is more than 8 router nodes with
+`siteToSiteDataTransfer` enabled. Until someone runs that, treat 8 router
+nodes as the tested ceiling.
+
+**The operator must not be pointed at the installer's Cloud Router.** Every
+OpenShift GCP cluster has an `<infra>-network-router` created to anchor Cloud
+NAT, since a NAT gateway cannot exist without a router to hang off. It has no
+ASN and no interfaces. Writing BGP peers onto it would entangle the operator
+with the resource the cluster's egress depends on, and `Cleanup` issues a full
+update against it. `DiscoverEndpoints` rejects a router with no interfaces,
+which is exactly the shape of the NAT router, so the realistic
+misconfiguration fails at discovery instead. That check is deliberate.
+
 ## Questions for the GCP authors
 
 These cannot be answered from the code:
 
-1. Is the per-node `FRRConfiguration` on GCP deliberate, or an artefact of the
-   Python controller it was ported from? Would a single configuration
-   selecting all router nodes converge identically? (Decision 2.)
+1. Answered by measurement: a single configuration selecting all router nodes
+   is what the manual run produced, and it worked. Worth confirming they know
+   of no case that needs the per-node split. (Decision 2.)
 2. Does anything outside the operator depend on the
    `routing.osd.redhat.com/bgp-router` label being applied by the operator
    rather than by Terraform or a MachineSet? (Decision 4.)

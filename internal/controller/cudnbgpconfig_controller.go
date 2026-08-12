@@ -56,7 +56,7 @@ import (
 // +kubebuilder:rbac:groups=frrk8s.metallb.io,resources=frrconfigurations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=infrastructures,verbs=get
 // +kubebuilder:rbac:groups=machine.openshift.io,resources=machines,verbs=get;list;watch;patch
 
@@ -143,7 +143,28 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		ObservedGeneration: config.Generation,
 	})
 
-	// Build the cloud platform once if this configuration uses one (Phases 3 and 5).
+	// Phase 3: Settle which nodes are BGP routers. Everything downstream
+	// selects on those labels, so this runs before discovery and before the
+	// FRR configurations are rendered.
+	if config.Spec.AutoLabelRouterNodes != nil {
+		labelled, unlabelled, err := SyncRouterLabels(ctx, r.Client, config)
+		if err != nil {
+			return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionRouterNodesLabelled,
+				"LabelSyncFailed", fmt.Sprintf("failed to sync router node labels: %v", err))
+		}
+		if labelled > 0 || unlabelled > 0 {
+			log.Info("router node labels synced", "labelled", labelled, "unlabelled", unlabelled)
+		}
+		meta.SetStatusCondition(&config.Status.Conditions, metav1.Condition{
+			Type:               networkingv1alpha1.ConditionRouterNodesLabelled,
+			Status:             metav1.ConditionTrue,
+			Reason:             "Synced",
+			Message:            "Router node labels are in sync with spec.autoLabelRouterNodes",
+			ObservedGeneration: config.Generation,
+		})
+	}
+
+	// Build the cloud platform once if this configuration uses one (Phases 4 and 6).
 	var cloud platform.CloudPlatform
 	var discoveryResult *platform.DiscoveryResult
 	if config.Spec.Platform != networkingv1alpha1.PlatformManual {
@@ -163,8 +184,8 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		cloud = p
 
-		// Phase 3: Discover cloud BGP endpoints
-		log.Info("Phase 3: discovering cloud BGP endpoints", "platform", config.Spec.Platform)
+		// Phase 4: Discover cloud BGP endpoints
+		log.Info("Phase 4: discovering cloud BGP endpoints", "platform", config.Spec.Platform)
 		discoveryResult, err = cloud.DiscoverEndpoints(ctx)
 		if err != nil {
 			return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudEndpointsDiscovered,
@@ -182,8 +203,8 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		})
 	}
 
-	// Phase 4: Apply FRR Configuration per peer group
-	log.Info("Phase 4: applying FRR configurations")
+	// Phase 5: Apply FRR Configuration per peer group
+	log.Info("Phase 5: applying FRR configurations")
 	var frrCount int
 	if discoveryResult != nil {
 		frrCount, err = EnsureFRRConfigurationsFromGroups(ctx, r.Client, config, discoveryResult.PeerGroups)
@@ -203,9 +224,9 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		ObservedGeneration: config.Generation,
 	})
 
-	// Phase 5: Reconcile cloud resources (if a platform is configured)
+	// Phase 6: Reconcile cloud resources (if a platform is configured)
 	if cloud != nil {
-		log.Info("Phase 5: reconciling cloud resources", "platform", config.Spec.Platform)
+		log.Info("Phase 6: reconciling cloud resources", "platform", config.Spec.Platform)
 		nodes, err := r.listRouterNodes(ctx, config)
 		if err != nil {
 			return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudResourcesReconciled,
@@ -428,6 +449,13 @@ func (r *CUDNBgpConfigReconciler) reconcileDelete(ctx context.Context, config *n
 			log.Error(err, "unable to discover endpoints for cleanup, skipping cloud resource cleanup")
 		} else if err := p.Cleanup(ctx); err != nil {
 			return ctrl.Result{}, fmt.Errorf("cleaning up cloud resources: %w", err)
+		}
+	}
+
+	if config.Spec.AutoLabelRouterNodes != nil {
+		log.Info("removing router node labels")
+		if _, err := RemoveAllRouterLabels(ctx, r.Client, config); err != nil {
+			return ctrl.Result{}, fmt.Errorf("removing router node labels: %w", err)
 		}
 	}
 

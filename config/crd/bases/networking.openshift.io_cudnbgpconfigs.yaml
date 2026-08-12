@@ -49,6 +49,34 @@ spec:
             type: object
           spec:
             properties:
+              autoLabelRouterNodes:
+                description: |-
+                  AutoLabelRouterNodesSpec makes the operator maintain
+                  spec.routerNodeSelector on the nodes that should be BGP routers, instead of
+                  requiring something else to have labelled them. Without it a node added by
+                  scaling a MachineSet is silently not a router, because the MachineSet
+                  template carries no such label.
+
+                  It is opt-in: leaving it unset means the operator only ever reads Node
+                  objects, which is the right behaviour where the labels are already managed
+                  deliberately.
+                properties:
+                  eligible:
+                    additionalProperties:
+                      type: string
+                    description: Eligible selects the nodes that should be BGP routers.
+                    minProperties: 1
+                    type: object
+                  exclude:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Exclude removes a node from eligibility if it carries any of these
+                      label keys, whatever their value. Typically infra nodes.
+                    type: object
+                required:
+                - eligible
+                type: object
               aws:
                 properties:
                   region:
@@ -173,6 +201,10 @@ spec:
               routerNodeSelector:
                 additionalProperties:
                   type: string
+                description: |-
+                  RouterNodeSelector identifies the BGP router nodes. When
+                  AutoLabelRouterNodes is set the operator maintains these labels;
+                  otherwise something else must apply them.
                 type: object
             required:
             - bgp

@@ -41,6 +41,7 @@ const (
 const (
 	ConditionNetworkOperatorPatched   = "NetworkOperatorPatched"
 	ConditionFRRNamespaceReady        = "FRRNamespaceReady"
+	ConditionRouterNodesLabelled      = "RouterNodesLabelled"
 	ConditionCloudEndpointsDiscovered = "CloudEndpointsDiscovered"
 	ConditionFRRConfigurationApplied  = "FRRConfigurationApplied"
 	ConditionCloudResourcesReconciled = "CloudResourcesReconciled"
@@ -148,6 +149,25 @@ type BGPConfig struct {
 	AvailabilityZones []AvailabilityZone `json:"availabilityZones,omitempty"`
 }
 
+// AutoLabelRouterNodesSpec makes the operator maintain
+// spec.routerNodeSelector on the nodes that should be BGP routers, instead of
+// requiring something else to have labelled them. Without it a node added by
+// scaling a MachineSet is silently not a router, because the MachineSet
+// template carries no such label.
+//
+// It is opt-in: leaving it unset means the operator only ever reads Node
+// objects, which is the right behaviour where the labels are already managed
+// deliberately.
+type AutoLabelRouterNodesSpec struct {
+	// Eligible selects the nodes that should be BGP routers.
+	// +kubebuilder:validation:MinProperties=1
+	Eligible map[string]string `json:"eligible"`
+	// Exclude removes a node from eligibility if it carries any of these
+	// label keys, whatever their value. Typically infra nodes.
+	// +optional
+	Exclude map[string]string `json:"exclude,omitempty"`
+}
+
 // +kubebuilder:validation:XValidation:rule="(self.platform == 'AWS') == has(self.aws)",message="spec.aws must be set when spec.platform is AWS, and must be absent otherwise"
 // +kubebuilder:validation:XValidation:rule="(self.platform == 'GCP') == has(self.gcp)",message="spec.gcp must be set when spec.platform is GCP, and must be absent otherwise"
 // +kubebuilder:validation:XValidation:rule="self.platform != 'Manual' || (has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones) > 0)",message="spec.bgp.availabilityZones is required when spec.platform is Manual"
@@ -156,11 +176,16 @@ type CUDNBgpConfigSpec struct {
 	// Platform selects which cloud the operator reconciles against and which
 	// cloud-specific block below must be populated.
 	// +kubebuilder:validation:Required
-	Platform           PlatformType      `json:"platform"`
-	BGP                BGPConfig         `json:"bgp"`
+	Platform PlatformType `json:"platform"`
+	BGP      BGPConfig    `json:"bgp"`
+	// RouterNodeSelector identifies the BGP router nodes. When
+	// AutoLabelRouterNodes is set the operator maintains these labels;
+	// otherwise something else must apply them.
 	RouterNodeSelector map[string]string `json:"routerNodeSelector"`
-	AWS                *AWSConfig        `json:"aws,omitempty"`
-	GCP                *GCPConfig        `json:"gcp,omitempty"`
+	// +optional
+	AutoLabelRouterNodes *AutoLabelRouterNodesSpec `json:"autoLabelRouterNodes,omitempty"`
+	AWS                  *AWSConfig                `json:"aws,omitempty"`
+	GCP                  *GCPConfig                `json:"gcp,omitempty"`
 }
 
 type CUDNBgpConfigStatus struct {

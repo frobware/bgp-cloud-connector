@@ -50,13 +50,17 @@ const (
 // against. It is the discriminator for the cloud-specific block in the spec.
 // Values are added only alongside a working implementation, so that an
 // unsupported cloud is rejected at admission rather than at runtime.
-// +kubebuilder:validation:Enum=AWS;Manual
+// +kubebuilder:validation:Enum=AWS;GCP;Manual
 type PlatformType string
 
 const (
 	// PlatformAWS discovers BGP neighbours from Route Server endpoints and
 	// reconciles Route Server peers and source/dest check. Requires spec.aws.
 	PlatformAWS PlatformType = "AWS"
+	// PlatformGCP discovers BGP neighbours from the Cloud Router and
+	// reconciles NCC spokes, Cloud Router peers and GCE instance attributes.
+	// Requires spec.gcp.
+	PlatformGCP PlatformType = "GCP"
 	// PlatformManual performs no cloud reconciliation. BGP neighbours are
 	// taken from spec.bgp.availabilityZones.
 	PlatformManual PlatformType = "Manual"
@@ -79,6 +83,43 @@ type AWSConfig struct {
 	Region string `json:"region"`
 	// +kubebuilder:validation:MinItems=1
 	RouteServerIDs []string `json:"routeServerIDs"`
+}
+
+// NCCConfig identifies the Network Connectivity Center hub the router nodes
+// attach to as spokes.
+type NCCConfig struct {
+	// +kubebuilder:validation:MinLength=1
+	HubName string `json:"hubName"`
+	// SpokePrefix names the spokes this operator manages. Spokes are numbered
+	// from it, because a hub spoke holds a limited number of instances.
+	// +kubebuilder:validation:MinLength=1
+	SpokePrefix string `json:"spokePrefix"`
+	// SiteToSiteDataTransfer enables NCC site-to-site data transfer on the
+	// managed spokes.
+	// +optional
+	SiteToSiteDataTransfer bool `json:"siteToSiteDataTransfer,omitempty"`
+}
+
+type GCPConfig struct {
+	// +kubebuilder:validation:MinLength=1
+	Project string `json:"project"`
+	// +kubebuilder:validation:MinLength=1
+	Region string `json:"region"`
+	// CloudRouterName is the Cloud Router the router nodes peer with. Its
+	// interface addresses become the BGP neighbours.
+	// +kubebuilder:validation:MinLength=1
+	CloudRouterName string    `json:"cloudRouterName"`
+	NCC             NCCConfig `json:"ncc"`
+	// EnableNestedVirtualization turns on nested virtualisation on the router
+	// instances, which KubeVirt needs. Enabling it restarts the instance.
+	// +optional
+	// +kubebuilder:default=true
+	EnableNestedVirtualization *bool `json:"enableNestedVirtualization,omitempty"`
+	// MachineNamespace holds the OpenShift Machine objects whose preTerminate
+	// hooks gate instance deletion until BGP peers are withdrawn.
+	// +optional
+	// +kubebuilder:default="openshift-machine-api"
+	MachineNamespace string `json:"machineNamespace,omitempty"`
 }
 
 type DiscoveredEndpoint struct {
@@ -108,6 +149,7 @@ type BGPConfig struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="(self.platform == 'AWS') == has(self.aws)",message="spec.aws must be set when spec.platform is AWS, and must be absent otherwise"
+// +kubebuilder:validation:XValidation:rule="(self.platform == 'GCP') == has(self.gcp)",message="spec.gcp must be set when spec.platform is GCP, and must be absent otherwise"
 // +kubebuilder:validation:XValidation:rule="self.platform != 'Manual' || (has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones) > 0)",message="spec.bgp.availabilityZones is required when spec.platform is Manual"
 // +kubebuilder:validation:XValidation:rule="self.platform == 'Manual' || !has(self.bgp.availabilityZones) || size(self.bgp.availabilityZones) == 0",message="spec.bgp.availabilityZones may only be set when spec.platform is Manual"
 type CUDNBgpConfigSpec struct {
@@ -118,6 +160,7 @@ type CUDNBgpConfigSpec struct {
 	BGP                BGPConfig         `json:"bgp"`
 	RouterNodeSelector map[string]string `json:"routerNodeSelector"`
 	AWS                *AWSConfig        `json:"aws,omitempty"`
+	GCP                *GCPConfig        `json:"gcp,omitempty"`
 }
 
 type CUDNBgpConfigStatus struct {
@@ -153,4 +196,10 @@ type CUDNBgpConfigList struct {
 
 func init() {
 	SchemeBuilder.Register(&CUDNBgpConfig{}, &CUDNBgpConfigList{})
+}
+
+// IsNestedVirtEnabled reports whether nested virtualisation should be enabled
+// on GCP router instances, defaulting to true when unset.
+func (c *GCPConfig) IsNestedVirtEnabled() bool {
+	return c.EnableNestedVirtualization == nil || *c.EnableNestedVirtualization
 }

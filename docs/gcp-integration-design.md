@@ -92,6 +92,11 @@ used only to populate `status`.
 
 ### 2. FRR granularity, and whether GCP needs per-node configurations
 
+**Taken provisionally: one peer group.** The implementation emits a single
+group covering all router nodes. It rests on the code reading below and has
+not been watched converging on a live cluster, so it is the first thing to
+check when GCP is exercised end to end.
+
 Here, one `FRRConfiguration` is generated per AZ. On GCP one is generated per
 node, selecting on `kubernetes.io/hostname`.
 
@@ -249,7 +254,7 @@ internal/controller/     unchanged responsibilities; frr.go consumes
 ## Plan
 
 Each stage is independently reviewable and leaves the tree green. Stages 1 to
-3 are implemented on this branch; 4 and 5 are not started.
+4 are implemented on this branch; stage 5 is not started.
 
 1. Generalise `platform.DiscoveryResult` to the peering plan; port the AWS
    implementation to emit `PeerGroup`; rewrite `frr.go` to consume it.
@@ -260,11 +265,24 @@ Each stage is independently reviewable and leaves the tree green. Stages 1 to
 2. Replace `if config.Spec.AWS != nil` with real platform dispatch behind the
    decision taken in 3. Verify: a config naming an unknown platform is rejected
    at admission, and the AWS path is unchanged.
+
+   Implemented and verified against an OCP 4.22.8 GCP cluster: a missing
+   `spec.platform` is `Required value`, `platform: Azure` is
+   `Unsupported value: "Azure": supported values: "AWS", "GCP", "Manual"`, and
+   each mismatch between the discriminator and the cloud block is rejected by
+   the CEL rule that covers it. Envtest does not run CEL, so this cannot be
+   covered by the unit suite.
 3. Add the optional `NodeLifecycle` interface with no implementations.
    Verify: build is unchanged, AWS behaviour is unchanged.
 4. Add `internal/platform/gcp/` implementing `CloudPlatform` and
    `NodeLifecycle`, with fake clients mirroring `aws_test.go`.
    Verify: unit tests against fakes; no live cluster needed.
+
+   Implemented. It resolves GCE identity from the node's `gce://` provider ID
+   rather than widening `platform.RouterNode`, emits a single peer group per
+   decision 2, and carries `disable-connected-check` in `RawFRRConfig`.
+   `spec.gcp` and the `GCP` enum value land with it, so an unimplemented
+   cloud is still rejected at admission.
 5. GCP e2e, modelled on `test/e2e/aws`.
    Verify: against a live OSD/GCP cluster.
 

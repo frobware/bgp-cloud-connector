@@ -1,0 +1,29 @@
+apiVersion: networking.openshift.io/v1alpha1
+kind: CUDNBgpConfig
+metadata:
+  name: cluster
+spec:
+  platform: GCP
+
+  bgp:
+    localASN: 65003                  # ASN FRR runs with on the router nodes
+    livenessDetection: bgp-keepalive # bfd | bgp-keepalive (default)
+
+  routerNodeSelector:
+    node-role.kubernetes.io/worker: ""
+
+  gcp:
+    project: my-gcp-project
+    region: europe-west1
+    # Interface addresses on this Cloud Router become the BGP neighbours.
+    # Every router node peers with all of them, so one FRRConfiguration
+    # covers the whole router set.
+    cloudRouterName: my-cluster-router
+    ncc:
+      hubName: my-cluster-hub        # NCC hub the router nodes attach to
+      spokePrefix: my-cluster-spoke  # spokes are numbered from this prefix
+      # siteToSiteDataTransfer: false
+    # Nested virtualisation is needed for KubeVirt. Enabling it restarts the
+    # instance, so turn it off if you do not run VMs on the router nodes.
+    # enableNestedVirtualization: true
+    # machineNamespace: openshift-machine-api

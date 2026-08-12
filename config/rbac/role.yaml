@@ -46,6 +46,15 @@ rules:
   - update
   - watch
 - apiGroups:
+  - machine.openshift.io
+  resources:
+  - machines
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
   - networking.k8s.io
   resources:
   - networkpolicies

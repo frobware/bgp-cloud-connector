@@ -48,7 +48,7 @@ func (f *fakeCompute) ReconcilePeers(_ context.Context, _, _ string, nodes []Rou
 	return true, nil
 }
 
-func (f *fakeCompute) ClearPeers(_ context.Context, _ string) (bool, error) {
+func (f *fakeCompute) ClearPeers(_ context.Context, _, _ string) (bool, error) {
 	f.clearCalled = true
 	return true, nil
 }

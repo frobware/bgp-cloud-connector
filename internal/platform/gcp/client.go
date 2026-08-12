@@ -27,7 +27,7 @@ type ComputeClient interface {
 	EnsureNestedVirtualization(ctx context.Context, node RouterNode) (changed bool, err error)
 	GetRouterTopology(ctx context.Context, routerName string) (*CloudRouterTopology, error)
 	ReconcilePeers(ctx context.Context, routerName, clusterID string, nodes []RouterNode, topology *CloudRouterTopology, localASN int64) (changed bool, err error)
-	ClearPeers(ctx context.Context, routerName string) (changed bool, err error)
+	ClearPeers(ctx context.Context, routerName, clusterID string) (changed bool, err error)
 }
 
 // NCCClient abstracts Network Connectivity Center spoke operations.

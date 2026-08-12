@@ -155,7 +155,7 @@ func (p *Platform) ReconcileNodes(ctx context.Context, nodes []platform.RouterNo
 
 // Cleanup removes every resource this platform manages.
 func (p *Platform) Cleanup(ctx context.Context) error {
-	if _, err := p.compute.ClearPeers(ctx, p.cfg.CloudRouterName); err != nil {
+	if _, err := p.compute.ClearPeers(ctx, p.cfg.CloudRouterName, p.cfg.ClusterID); err != nil {
 		return fmt.Errorf("clearing Cloud Router peers: %w", err)
 	}
 	ids, err := p.ncc.ListSpokesByPrefix(ctx, p.cfg.NCCHubName, p.cfg.NCCSpokePrefix)

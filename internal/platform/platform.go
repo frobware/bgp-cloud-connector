@@ -61,3 +61,14 @@ type CloudPlatform interface {
 	ReconcileNodes(ctx context.Context, nodes []RouterNode) error
 	Cleanup(ctx context.Context) error
 }
+
+// CredentialError reports that a platform could not authenticate against its
+// cloud. The controller surfaces it as a distinct condition reason so that a
+// missing or expired credential is not reported as a discovery failure.
+type CredentialError struct {
+	Msg string
+}
+
+func (e *CredentialError) Error() string {
+	return e.Msg
+}

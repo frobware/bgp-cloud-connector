@@ -132,7 +132,7 @@ func TestNew_STSVerificationFailure(t *testing.T) {
 		Region: "us-east-1",
 	}, &mockEC2{}, &mockSTS{err: errors.New("InvalidClientTokenId")})
 
-	var credErr *CredentialError
+	var credErr *platform.CredentialError
 	if !errors.As(err, &credErr) {
 		t.Fatalf("expected CredentialError, got: %v", err)
 	}

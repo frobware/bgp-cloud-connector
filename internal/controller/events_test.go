@@ -132,8 +132,9 @@ func TestEvents_WarningOnDegrade(t *testing.T) {
 			return nil, &platform.CredentialError{Msg: "invalid credentials"}
 		},
 	}
-	if _, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}}); err != nil {
-		t.Fatalf("reconcile: %v", err)
+	// A credential failure is a system fault, so it is returned as an error.
+	if _, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}}); err == nil {
+		t.Fatal("expected the credential failure to surface as an error")
 	}
 
 	joined := strings.Join(drain(rec), "\n")

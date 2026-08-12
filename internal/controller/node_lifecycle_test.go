@@ -79,7 +79,7 @@ func (m *mockLifecyclePlatform) ReconcileNodes(ctx context.Context, nodes []plat
 	return m.mockPlatform.ReconcileNodes(ctx, nodes)
 }
 
-func runLifecycleReconcile(t *testing.T, mock platform.CloudPlatform, nodes ...*corev1.Node) *networkingv1alpha1.CUDNBgpConfig {
+func runLifecycleReconcile(t *testing.T, mock platform.CloudPlatform, wantErr bool, nodes ...*corev1.Node) *networkingv1alpha1.CUDNBgpConfig {
 	t.Helper()
 
 	config := newTestCUDNBgpConfigWithAWS()
@@ -118,7 +118,12 @@ func runLifecycleReconcile(t *testing.T, mock platform.CloudPlatform, nodes ...*
 
 	// A single pass adds the finalizer and runs every phase, so the recorded
 	// call sequence is exactly one reconciliation's worth.
-	if _, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}}); err != nil {
+	_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}})
+	if wantErr {
+		if err == nil {
+			t.Fatal("expected the reconcile to fail")
+		}
+	} else if err != nil {
 		t.Fatalf("reconcile error: %v", err)
 	}
 
@@ -136,7 +141,7 @@ func runLifecycleReconcile(t *testing.T, mock platform.CloudPlatform, nodes ...*
 func TestLifecycle_TerminatingNodeExcludedThenReleased(t *testing.T) {
 	mock := &mockLifecyclePlatform{terminating: []string{"node-2"}}
 
-	runLifecycleReconcile(t, mock,
+	runLifecycleReconcile(t, mock, false,
 		newRouterNode("node-1", "10.0.1.10", "us-east-1a", "aws:///us-east-1a/i-001"),
 		newRouterNode("node-2", "10.0.2.10", "us-east-1b", "aws:///us-east-1b/i-002"),
 	)
@@ -164,7 +169,7 @@ func TestLifecycle_TerminatingNodeExcludedThenReleased(t *testing.T) {
 func TestLifecycle_NothingTerminatingSkipsRelease(t *testing.T) {
 	mock := &mockLifecyclePlatform{}
 
-	runLifecycleReconcile(t, mock,
+	runLifecycleReconcile(t, mock, false,
 		newRouterNode("node-1", "10.0.1.10", "us-east-1a", "aws:///us-east-1a/i-001"),
 	)
 
@@ -183,7 +188,7 @@ func TestLifecycle_NothingTerminatingSkipsRelease(t *testing.T) {
 func TestLifecycle_NotImplementedIsSkipped(t *testing.T) {
 	mock := &mockPlatform{}
 
-	updated := runLifecycleReconcile(t, mock,
+	updated := runLifecycleReconcile(t, mock, false,
 		newRouterNode("node-1", "10.0.1.10", "us-east-1a", "aws:///us-east-1a/i-001"),
 	)
 
@@ -203,7 +208,7 @@ func TestLifecycle_NotImplementedIsSkipped(t *testing.T) {
 func TestLifecycle_HoldFailureDegrades(t *testing.T) {
 	mock := &mockLifecyclePlatform{holdErr: errStub}
 
-	updated := runLifecycleReconcile(t, mock,
+	updated := runLifecycleReconcile(t, mock, true,
 		newRouterNode("node-1", "10.0.1.10", "us-east-1a", "aws:///us-east-1a/i-001"),
 	)
 

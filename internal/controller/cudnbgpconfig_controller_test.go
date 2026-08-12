@@ -421,9 +421,14 @@ func TestConfigReconcile_AWSCredentialFailure(t *testing.T) {
 		},
 	}
 
-	result, _ := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}})
-	if result.RequeueAfter != 30*time.Second {
-		t.Errorf("expected 30s degraded requeue, got %v", result.RequeueAfter)
+	result, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}})
+	// A system fault is returned so the workqueue backs off, rather than
+	// pinned to a fixed poll of whatever is failing.
+	if err == nil {
+		t.Error("expected the failure to surface as an error")
+	}
+	if result.RequeueAfter != 0 {
+		t.Errorf("an error already requeues; RequeueAfter should be unset, got %v", result.RequeueAfter)
 	}
 
 	updated := &networkingv1alpha1.CUDNBgpConfig{}
@@ -474,9 +479,14 @@ func TestConfigReconcile_AWSDiscoveryFailure(t *testing.T) {
 		},
 	}
 
-	result, _ := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}})
-	if result.RequeueAfter != 30*time.Second {
-		t.Errorf("expected 30s degraded requeue, got %v", result.RequeueAfter)
+	result, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}})
+	// A system fault is returned so the workqueue backs off, rather than
+	// pinned to a fixed poll of whatever is failing.
+	if err == nil {
+		t.Error("expected the failure to surface as an error")
+	}
+	if result.RequeueAfter != 0 {
+		t.Errorf("an error already requeues; RequeueAfter should be unset, got %v", result.RequeueAfter)
 	}
 
 	updated := &networkingv1alpha1.CUDNBgpConfig{}
@@ -528,9 +538,14 @@ func TestConfigReconcile_AWSReconcileFailure(t *testing.T) {
 		},
 	}
 
-	result, _ := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}})
-	if result.RequeueAfter != 30*time.Second {
-		t.Errorf("expected 30s degraded requeue, got %v", result.RequeueAfter)
+	result, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}})
+	// A system fault is returned so the workqueue backs off, rather than
+	// pinned to a fixed poll of whatever is failing.
+	if err == nil {
+		t.Error("expected the failure to surface as an error")
+	}
+	if result.RequeueAfter != 0 {
+		t.Errorf("an error already requeues; RequeueAfter should be unset, got %v", result.RequeueAfter)
 	}
 
 	updated := &networkingv1alpha1.CUDNBgpConfig{}

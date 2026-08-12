@@ -3,6 +3,7 @@ kind: CUDNBgpConfig
 metadata:
   name: cluster
 spec:
+  platform: Manual
   bgp:
     localASN: 64502
     livenessDetection: bfd

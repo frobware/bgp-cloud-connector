@@ -207,7 +207,7 @@ Two CRDs with clear separation of concerns:
 
 ### CUDNBgpConfig (singleton - without cloud integration - using PoC configuration)
 
-When `spec.aws` is absent, `spec.bgp.availabilityZones` is required — the user provides explicit neighbor addresses and per-AZ node selectors.
+When `spec.platform` is `Manual`, `spec.bgp.availabilityZones` is required and `spec.aws` must be absent — the user provides explicit neighbor addresses and per-AZ node selectors.
 
 ```yaml
 apiVersion: networking.openshift.io/v1alpha1
@@ -215,6 +215,8 @@ kind: CUDNBgpConfig
 metadata:
   name: cluster
 spec:
+  platform: Manual
+
   routerNodeSelector:
     bgp_router: "true"              # must match labels on BGP router machine pools
 
@@ -250,7 +252,7 @@ spec:
 
 ### CUDNBgpConfig (singleton - with AWS integration - using PoC configuration)
 
-When `spec.aws` is configured, `spec.bgp.availabilityZones` must not be set — the two sections are mutually exclusive (enforced by CRD validation). The operator auto-discovers Route Server endpoints, BGP neighbor addresses, remote ASN, and AZ mapping from the provided Route Server IDs.
+When `spec.platform` is `AWS`, `spec.aws` is required and `spec.bgp.availabilityZones` must not be set (enforced by CRD validation). The operator auto-discovers Route Server endpoints, BGP neighbor addresses, remote ASN, and AZ mapping from the provided Route Server IDs.
 
 ```yaml
 apiVersion: networking.openshift.io/v1alpha1
@@ -258,6 +260,8 @@ kind: CUDNBgpConfig
 metadata:
   name: cluster
 spec:
+  platform: AWS
+
   routerNodeSelector:
     bgp_router: "true"              # must match labels on BGP router machine pools
 

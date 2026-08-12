@@ -117,6 +117,7 @@ func goldenConfig(liveness networkingv1alpha1.LivenessDetectionType) *networking
 	return &networkingv1alpha1.CUDNBgpConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: SingletonName},
 		Spec: networkingv1alpha1.CUDNBgpConfigSpec{
+			Platform:           networkingv1alpha1.PlatformManual,
 			RouterNodeSelector: map[string]string{"bgp-router": "true"},
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,

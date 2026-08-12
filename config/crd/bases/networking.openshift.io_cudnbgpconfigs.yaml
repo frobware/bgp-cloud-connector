@@ -15,6 +15,9 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.platform
+      name: Platform
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -103,22 +106,35 @@ spec:
                 required:
                 - localASN
                 type: object
+              platform:
+                description: |-
+                  Platform selects which cloud the operator reconciles against and which
+                  cloud-specific block below must be populated.
+                enum:
+                - AWS
+                - Manual
+                type: string
               routerNodeSelector:
                 additionalProperties:
                   type: string
                 type: object
             required:
             - bgp
+            - platform
             - routerNodeSelector
             type: object
             x-kubernetes-validations:
-            - message: spec.aws and spec.bgp.availabilityZones are mutually exclusive
-              rule: '!(has(self.aws) && has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones)
-                > 0)'
-            - message: spec.bgp.availabilityZones is required when spec.aws is not
-                configured
-              rule: has(self.aws) || (has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones)
-                > 0)
+            - message: spec.aws must be set when spec.platform is AWS, and must be
+                absent otherwise
+              rule: (self.platform == 'AWS') == has(self.aws)
+            - message: spec.bgp.availabilityZones is required when spec.platform is
+                Manual
+              rule: self.platform != 'Manual' || (has(self.bgp.availabilityZones)
+                && size(self.bgp.availabilityZones) > 0)
+            - message: spec.bgp.availabilityZones may only be set when spec.platform
+                is Manual
+              rule: self.platform == 'Manual' || !has(self.bgp.availabilityZones)
+                || size(self.bgp.availabilityZones) == 0
           status:
             properties:
               aws:

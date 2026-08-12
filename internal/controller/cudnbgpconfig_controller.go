@@ -45,6 +45,7 @@ import (
 	networkingv1alpha1 "github.com/openshift/bgp-cloud-connector/api/v1alpha1"
 	"github.com/openshift/bgp-cloud-connector/internal/platform"
 	awsplatform "github.com/openshift/bgp-cloud-connector/internal/platform/aws"
+	gcpplatform "github.com/openshift/bgp-cloud-connector/internal/platform/gcp"
 )
 
 // +kubebuilder:rbac:groups=networking.openshift.io,resources=cudnbgpconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -57,6 +58,7 @@ import (
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=infrastructures,verbs=get
+// +kubebuilder:rbac:groups=machine.openshift.io,resources=machines,verbs=get;list;watch;patch
 
 type PlatformBuilderFunc func(ctx context.Context, c client.Client, config *networkingv1alpha1.CUDNBgpConfig) (platform.CloudPlatform, error)
 
@@ -322,6 +324,28 @@ func buildAWSPlatform(ctx context.Context, c client.Client, config *networkingv1
 	}
 
 	return awsplatform.New(ctx, cfg)
+}
+
+func buildGCPPlatform(ctx context.Context, c client.Client, config *networkingv1alpha1.CUDNBgpConfig) (platform.CloudPlatform, error) {
+	gcpSpec := config.Spec.GCP
+
+	clusterID, err := getInfrastructureName(ctx, c)
+	if err != nil {
+		return nil, fmt.Errorf("reading cluster infrastructure name: %w", err)
+	}
+
+	return gcpplatform.New(ctx, gcpplatform.Config{
+		Project:          gcpSpec.Project,
+		Region:           gcpSpec.Region,
+		CloudRouterName:  gcpSpec.CloudRouterName,
+		NCCHubName:       gcpSpec.NCC.HubName,
+		NCCSpokePrefix:   gcpSpec.NCC.SpokePrefix,
+		SiteToSite:       gcpSpec.NCC.SiteToSiteDataTransfer,
+		NestedVirt:       gcpSpec.IsNestedVirtEnabled(),
+		MachineNamespace: gcpSpec.MachineNamespace,
+		LocalASN:         config.Spec.BGP.LocalASN,
+		ClusterID:        clusterID,
+	}, c)
 }
 
 func getInfrastructureName(ctx context.Context, c client.Client) (string, error) {

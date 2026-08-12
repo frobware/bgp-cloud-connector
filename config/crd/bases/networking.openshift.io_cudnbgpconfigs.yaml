@@ -106,12 +106,68 @@ spec:
                 required:
                 - localASN
                 type: object
+              gcp:
+                properties:
+                  cloudRouterName:
+                    description: |-
+                      CloudRouterName is the Cloud Router the router nodes peer with. Its
+                      interface addresses become the BGP neighbours.
+                    minLength: 1
+                    type: string
+                  enableNestedVirtualization:
+                    default: true
+                    description: |-
+                      EnableNestedVirtualization turns on nested virtualisation on the router
+                      instances, which KubeVirt needs. Enabling it restarts the instance.
+                    type: boolean
+                  machineNamespace:
+                    default: openshift-machine-api
+                    description: |-
+                      MachineNamespace holds the OpenShift Machine objects whose preTerminate
+                      hooks gate instance deletion until BGP peers are withdrawn.
+                    type: string
+                  ncc:
+                    description: |-
+                      NCCConfig identifies the Network Connectivity Center hub the router nodes
+                      attach to as spokes.
+                    properties:
+                      hubName:
+                        minLength: 1
+                        type: string
+                      siteToSiteDataTransfer:
+                        description: |-
+                          SiteToSiteDataTransfer enables NCC site-to-site data transfer on the
+                          managed spokes.
+                        type: boolean
+                      spokePrefix:
+                        description: |-
+                          SpokePrefix names the spokes this operator manages. Spokes are numbered
+                          from it, because a hub spoke holds a limited number of instances.
+                        minLength: 1
+                        type: string
+                    required:
+                    - hubName
+                    - spokePrefix
+                    type: object
+                  project:
+                    minLength: 1
+                    type: string
+                  region:
+                    minLength: 1
+                    type: string
+                required:
+                - cloudRouterName
+                - ncc
+                - project
+                - region
+                type: object
               platform:
                 description: |-
                   Platform selects which cloud the operator reconciles against and which
                   cloud-specific block below must be populated.
                 enum:
                 - AWS
+                - GCP
                 - Manual
                 type: string
               routerNodeSelector:
@@ -127,6 +183,9 @@ spec:
             - message: spec.aws must be set when spec.platform is AWS, and must be
                 absent otherwise
               rule: (self.platform == 'AWS') == has(self.aws)
+            - message: spec.gcp must be set when spec.platform is GCP, and must be
+                absent otherwise
+              rule: (self.platform == 'GCP') == has(self.gcp)
             - message: spec.bgp.availabilityZones is required when spec.platform is
                 Manual
               rule: self.platform != 'Manual' || (has(self.bgp.availabilityZones)

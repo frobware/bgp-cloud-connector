@@ -87,7 +87,7 @@ func TestEnsureFRRConfigurations_BFDProfile(t *testing.T) {
 					},
 				},
 			},
-			RouterNodeSelector: map[string]string{"bgp_router": "true"},
+			RouterNodeSelector: map[string]string{"networking.openshift.io/cudn-bgp-router": ""},
 		},
 	}
 
@@ -147,7 +147,7 @@ func TestEnsureFRRConfigurations_PrunesStale(t *testing.T) {
 					},
 				},
 			},
-			RouterNodeSelector: map[string]string{"bgp_router": "true"},
+			RouterNodeSelector: map[string]string{"networking.openshift.io/cudn-bgp-router": ""},
 		},
 	}
 
@@ -204,7 +204,7 @@ func TestEnsureFRRConfigurations_KeepsUnmanagedResources(t *testing.T) {
 					},
 				},
 			},
-			RouterNodeSelector: map[string]string{"bgp_router": "true"},
+			RouterNodeSelector: map[string]string{"networking.openshift.io/cudn-bgp-router": ""},
 		},
 	}
 

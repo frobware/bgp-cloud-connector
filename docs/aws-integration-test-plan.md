@@ -19,7 +19,7 @@ Automated test plan for the CUDN BGP Routing Operator's AWS platform integration
 | Remote BGP ASN | 64512 (Route Server ASN, auto-discovered) |
 | Route Server IDs | 1 (with 2 endpoints per AZ, 6 total, auto-discovered) |
 | Liveness detection | bfd |
-| BGP router nodes | 1 per AZ (3 total), labeled `bgp_router: "true"` |
+| BGP router nodes | 1 per AZ (3 total), labeled `networking.openshift.io/cudn-bgp-router: ""` |
 | CUDN network | name=`prod`, CIDR from Terraform outputs |
 
 The default credential chain (IRSA) is bypassed in unit tests via mock injection. Discovery API calls (`DescribeRouteServers`, `DescribeRouteServerEndpoints`, `DescribeSubnets`) are mocked alongside the existing peer and instance mocks.

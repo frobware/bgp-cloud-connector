@@ -25,7 +25,7 @@ The overall solution (e.g. AWS) has two layers. The operator manages the in-clus
 │  Cloud Infrastructure (Terraform provisions once)                    │
 │                                                                      │
 │  VPC / subnets / route server / TGW / etc.                           │
-│  Machine pools labeled bgp_router: "true" (Terraform input)          │
+│  Machine pools labeled networking.openshift.io/cudn-bgp-router: "" (Terraform input)          │
 │  Terraform outputs: Route Server IDs, local BGP ASN, AWS region      │
 └──────────────────────────────────┬───────────────────────────────────┘
                                    │ user copies terraform outputs
@@ -218,7 +218,7 @@ spec:
   platform: Manual
 
   routerNodeSelector:
-    bgp_router: "true"              # must match labels on BGP router machine pools
+    networking.openshift.io/cudn-bgp-router: ""              # must match labels on BGP router machine pools
 
   bgp:
     localASN: 65001                  # terraform output rosa_bgp_asn
@@ -263,7 +263,7 @@ spec:
   platform: AWS
 
   routerNodeSelector:
-    bgp_router: "true"              # must match labels on BGP router machine pools
+    networking.openshift.io/cudn-bgp-router: ""              # must match labels on BGP router machine pools
 
   bgp:
     localASN: 65001                  # terraform output rosa_bgp_asn
@@ -312,7 +312,7 @@ spec:
 
 | Field | Required | Description |
 |:---|:---|:---|
-| `spec.routerNodeSelector` | Yes | Cluster-wide label selector for all BGP-enabled worker nodes (e.g. `bgp_router: "true"`). Must match labels applied to BGP router machine pools. |
+| `spec.routerNodeSelector` | Yes | Cluster-wide label selector for all BGP-enabled worker nodes (e.g. `networking.openshift.io/cudn-bgp-router: ""`). Must match labels applied to BGP router machine pools. |
 | `spec.bgp.localASN` | Yes | AS number for the OCP FRR routers. From `terraform output rosa_bgp_asn`. |
 | `spec.bgp.livenessDetection` | No | `bfd` or `bgp-keepalive` (default). Applies to all neighbors. BFD detects peer failure in ~1s (300ms interval × 3 multiplier). BGP keepalive detects peer failure in ~90s (default hold time). Each AZ has 2 RS endpoints, so failover on a single peer failure is automatic. |
 | `spec.bgp.availabilityZones[]` | If `spec.aws` absent | Per-AZ BGP peering groups with explicit neighbor addresses. Required when `spec.aws` is absent. **Must not be set when `spec.aws` is present** — the two are mutually exclusive (CRD-enforced). |
@@ -374,7 +374,7 @@ metadata:
 spec:
   nodeSelector:
     matchLabels:
-      bgp_router: "true"
+      networking.openshift.io/cudn-bgp-router: ""
       topology.kubernetes.io/zone: us-east-1a
       bgp_router_subnet: "1"
   bgp:
@@ -404,7 +404,7 @@ metadata:
 spec:
   nodeSelector:
     matchLabels:
-      bgp_router: "true"
+      networking.openshift.io/cudn-bgp-router: ""
       topology.kubernetes.io/zone: us-east-1b
       bgp_router_subnet: "2"
   bgp:
@@ -434,7 +434,7 @@ metadata:
 spec:
   nodeSelector:
     matchLabels:
-      bgp_router: "true"
+      networking.openshift.io/cudn-bgp-router: ""
       topology.kubernetes.io/zone: us-east-1c
       bgp_router_subnet: "3"
   bgp:

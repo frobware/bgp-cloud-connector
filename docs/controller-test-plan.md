@@ -22,7 +22,7 @@ Tests for the CUDN BGP Routing Operator controllers and helpers. Unit tests are 
 |:---|:---|
 | Local BGP ASN | 65001 |
 | Remote BGP ASN | 64512 |
-| Router node selector | `bgp_router: "true"` |
+| Router node selector | `networking.openshift.io/cudn-bgp-router: ""` |
 | Availability Zones | 1 (minimal for unit tests) |
 | Neighbor addresses | `10.0.1.47`, `10.0.1.183` |
 | CUDN subnets | `10.100.0.0/16` |

@@ -47,7 +47,7 @@ func nodeLabels(t *testing.T, c client.Client, name string) map[string]string {
 
 func autoLabelConfig() *networkingv1alpha1.CUDNBgpConfig {
 	config := newTestCUDNBgpConfig()
-	config.Spec.RouterNodeSelector = map[string]string{"bgp_router": "true"}
+	config.Spec.RouterNodeSelector = map[string]string{"networking.openshift.io/cudn-bgp-router": ""}
 	config.Spec.AutoLabelRouterNodes = &networkingv1alpha1.AutoLabelRouterNodesSpec{
 		Eligible: map[string]string{"node-role.kubernetes.io/worker": ""},
 		Exclude:  map[string]string{"node-role.kubernetes.io/infra": ""},
@@ -59,7 +59,7 @@ func autoLabelConfig() *networkingv1alpha1.CUDNBgpConfig {
 // nodes themselves: with the feature off, the operator never writes to a Node.
 func TestSyncRouterLabels_Disabled(t *testing.T) {
 	config := newTestCUDNBgpConfig()
-	config.Spec.RouterNodeSelector = map[string]string{"bgp_router": "true"}
+	config.Spec.RouterNodeSelector = map[string]string{"networking.openshift.io/cudn-bgp-router": ""}
 	config.Spec.AutoLabelRouterNodes = nil
 
 	worker := labelledNode("worker-a", map[string]string{"node-role.kubernetes.io/worker": ""})
@@ -72,7 +72,7 @@ func TestSyncRouterLabels_Disabled(t *testing.T) {
 	if added != 0 || removed != 0 {
 		t.Errorf("expected no changes, got added=%d removed=%d", added, removed)
 	}
-	if _, has := nodeLabels(t, c, "worker-a")["bgp_router"]; has {
+	if _, has := nodeLabels(t, c, "worker-a")["networking.openshift.io/cudn-bgp-router"]; has {
 		t.Error("operator must not label nodes when auto-labelling is off")
 	}
 }
@@ -97,8 +97,8 @@ func TestSyncRouterLabels_LabelsEligible(t *testing.T) {
 	}
 
 	got := nodeLabels(t, c, "worker-a")
-	if got["bgp_router"] != "true" {
-		t.Errorf("expected bgp_router=true, got %q", got["bgp_router"])
+	if _, labelled := got["networking.openshift.io/cudn-bgp-router"]; !labelled {
+		t.Errorf("expected the node to carry networking.openshift.io/cudn-bgp-router, got %v", got)
 	}
 	if _, has := got["kubernetes.io/hostname"]; !has {
 		t.Error("unrelated labels must be preserved")
@@ -123,7 +123,7 @@ func TestSyncRouterLabels_SkipsExcluded(t *testing.T) {
 		t.Errorf("expected nothing labelled, got %d", added)
 	}
 	for _, n := range []string{"infra-a", "master-a"} {
-		if _, has := nodeLabels(t, c, n)["bgp_router"]; has {
+		if _, has := nodeLabels(t, c, n)["networking.openshift.io/cudn-bgp-router"]; has {
 			t.Errorf("%s must not be labelled", n)
 		}
 	}
@@ -135,10 +135,10 @@ func TestSyncRouterLabels_RemovesFromIneligible(t *testing.T) {
 	config := autoLabelConfig()
 
 	stale := labelledNode("was-router", map[string]string{
-		"node-role.kubernetes.io/worker": "",
-		"node-role.kubernetes.io/infra":  "",
-		"bgp_router":                     "true",
-		"kubernetes.io/hostname":         "was-router",
+		"node-role.kubernetes.io/worker":          "",
+		"node-role.kubernetes.io/infra":           "",
+		"networking.openshift.io/cudn-bgp-router": "",
+		"kubernetes.io/hostname":                  "was-router",
 	})
 	c := fake.NewClientBuilder().WithScheme(configTestScheme()).WithObjects(stale).Build()
 
@@ -151,7 +151,7 @@ func TestSyncRouterLabels_RemovesFromIneligible(t *testing.T) {
 	}
 
 	got := nodeLabels(t, c, "was-router")
-	if _, has := got["bgp_router"]; has {
+	if _, has := got["networking.openshift.io/cudn-bgp-router"]; has {
 		t.Error("expected the router label to be removed")
 	}
 	if _, has := got["kubernetes.io/hostname"]; !has {
@@ -165,8 +165,8 @@ func TestSyncRouterLabels_Idempotent(t *testing.T) {
 	config := autoLabelConfig()
 
 	worker := labelledNode("worker-a", map[string]string{
-		"node-role.kubernetes.io/worker": "",
-		"bgp_router":                     "true",
+		"node-role.kubernetes.io/worker":          "",
+		"networking.openshift.io/cudn-bgp-router": "",
 	})
 	c := fake.NewClientBuilder().WithScheme(configTestScheme()).WithObjects(worker).Build()
 
@@ -194,8 +194,8 @@ func TestSyncRouterLabels_Idempotent(t *testing.T) {
 func TestRemoveAllRouterLabels(t *testing.T) {
 	config := autoLabelConfig()
 
-	a := labelledNode("worker-a", map[string]string{"node-role.kubernetes.io/worker": "", "bgp_router": "true"})
-	b := labelledNode("worker-b", map[string]string{"node-role.kubernetes.io/worker": "", "bgp_router": "true"})
+	a := labelledNode("worker-a", map[string]string{"node-role.kubernetes.io/worker": "", "networking.openshift.io/cudn-bgp-router": ""})
+	b := labelledNode("worker-b", map[string]string{"node-role.kubernetes.io/worker": "", "networking.openshift.io/cudn-bgp-router": ""})
 	c := fake.NewClientBuilder().WithScheme(configTestScheme()).WithObjects(a, b).Build()
 
 	removed, err := RemoveAllRouterLabels(context.Background(), c, config)
@@ -206,7 +206,7 @@ func TestRemoveAllRouterLabels(t *testing.T) {
 		t.Errorf("expected 2 nodes unlabelled, got %d", removed)
 	}
 	for _, n := range []string{"worker-a", "worker-b"} {
-		if _, has := nodeLabels(t, c, n)["bgp_router"]; has {
+		if _, has := nodeLabels(t, c, n)["networking.openshift.io/cudn-bgp-router"]; has {
 			t.Errorf("%s still carries the router label", n)
 		}
 	}
@@ -216,10 +216,10 @@ func TestRemoveAllRouterLabels(t *testing.T) {
 // not its to remove.
 func TestRemoveAllRouterLabels_Disabled(t *testing.T) {
 	config := newTestCUDNBgpConfig()
-	config.Spec.RouterNodeSelector = map[string]string{"bgp_router": "true"}
+	config.Spec.RouterNodeSelector = map[string]string{"networking.openshift.io/cudn-bgp-router": ""}
 	config.Spec.AutoLabelRouterNodes = nil
 
-	a := labelledNode("worker-a", map[string]string{"bgp_router": "true"})
+	a := labelledNode("worker-a", map[string]string{"networking.openshift.io/cudn-bgp-router": ""})
 	c := fake.NewClientBuilder().WithScheme(configTestScheme()).WithObjects(a).Build()
 
 	removed, err := RemoveAllRouterLabels(context.Background(), c, config)
@@ -229,7 +229,7 @@ func TestRemoveAllRouterLabels_Disabled(t *testing.T) {
 	if removed != 0 {
 		t.Errorf("expected nothing removed, got %d", removed)
 	}
-	if _, has := nodeLabels(t, c, "worker-a")["bgp_router"]; !has {
+	if _, has := nodeLabels(t, c, "worker-a")["networking.openshift.io/cudn-bgp-router"]; !has {
 		t.Error("a label the operator did not apply must not be removed")
 	}
 }

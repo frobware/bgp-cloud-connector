@@ -69,7 +69,7 @@ func newTestCUDNBgpConfig() *networkingv1alpha1.CUDNBgpConfig {
 					},
 				},
 			},
-			RouterNodeSelector: map[string]string{"bgp_router": "true"},
+			RouterNodeSelector: map[string]string{"networking.openshift.io/cudn-bgp-router": ""},
 		},
 	}
 }
@@ -262,7 +262,7 @@ func newTestCUDNBgpConfigWithAWS() *networkingv1alpha1.CUDNBgpConfig {
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,
 			},
-			RouterNodeSelector: map[string]string{"bgp_router": "true"},
+			RouterNodeSelector: map[string]string{"networking.openshift.io/cudn-bgp-router": ""},
 			AWS: &networkingv1alpha1.AWSConfig{
 				Region:         "us-east-1",
 				RouteServerIDs: []string{"rs-1"},
@@ -275,7 +275,7 @@ func newRouterNode(name, ip, az, providerID string) *corev1.Node {
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
-			Labels: map[string]string{"bgp_router": "true", "topology.kubernetes.io/zone": az},
+			Labels: map[string]string{"networking.openshift.io/cudn-bgp-router": "", "topology.kubernetes.io/zone": az},
 		},
 		Spec: corev1.NodeSpec{ProviderID: providerID},
 		Status: corev1.NodeStatus{
@@ -577,14 +577,14 @@ func TestConfigReconcile_AWSNodeFiltering(t *testing.T) {
 	missingIP := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   "node-no-ip",
-			Labels: map[string]string{"bgp_router": "true", "topology.kubernetes.io/zone": "us-east-1a"},
+			Labels: map[string]string{"networking.openshift.io/cudn-bgp-router": "", "topology.kubernetes.io/zone": "us-east-1a"},
 		},
 		Spec: corev1.NodeSpec{ProviderID: "aws:///us-east-1a/i-004"},
 	}
 	missingAZ := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   "node-no-az",
-			Labels: map[string]string{"bgp_router": "true"},
+			Labels: map[string]string{"networking.openshift.io/cudn-bgp-router": ""},
 		},
 		Spec: corev1.NodeSpec{ProviderID: "aws:///us-east-1a/i-005"},
 		Status: corev1.NodeStatus{

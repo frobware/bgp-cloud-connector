@@ -22,7 +22,7 @@ metadata:
                 }
               ]
             },
-            "routerNodeSelector": {"bgp_router": "true"}
+            "routerNodeSelector": {"networking.openshift.io/cudn-bgp-router": ""}
           }
         },
         {

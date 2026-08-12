@@ -39,11 +39,27 @@ const (
 )
 
 const (
-	ConditionNetworkOperatorPatched  = "NetworkOperatorPatched"
-	ConditionFRRNamespaceReady       = "FRRNamespaceReady"
-	ConditionAWSEndpointsDiscovered  = "AWSEndpointsDiscovered"
-	ConditionFRRConfigurationApplied = "FRRConfigurationApplied"
-	ConditionAWSResourcesReconciled  = "AWSResourcesReconciled"
+	ConditionNetworkOperatorPatched   = "NetworkOperatorPatched"
+	ConditionFRRNamespaceReady        = "FRRNamespaceReady"
+	ConditionCloudEndpointsDiscovered = "CloudEndpointsDiscovered"
+	ConditionFRRConfigurationApplied  = "FRRConfigurationApplied"
+	ConditionCloudResourcesReconciled = "CloudResourcesReconciled"
+)
+
+// PlatformType selects which cloud the operator reconciles BGP peering
+// against. It is the discriminator for the cloud-specific block in the spec.
+// Values are added only alongside a working implementation, so that an
+// unsupported cloud is rejected at admission rather than at runtime.
+// +kubebuilder:validation:Enum=AWS;Manual
+type PlatformType string
+
+const (
+	// PlatformAWS discovers BGP neighbours from Route Server endpoints and
+	// reconciles Route Server peers and source/dest check. Requires spec.aws.
+	PlatformAWS PlatformType = "AWS"
+	// PlatformManual performs no cloud reconciliation. BGP neighbours are
+	// taken from spec.bgp.availabilityZones.
+	PlatformManual PlatformType = "Manual"
 )
 
 type BGPNeighbor struct {
@@ -91,9 +107,14 @@ type BGPConfig struct {
 	AvailabilityZones []AvailabilityZone `json:"availabilityZones,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="!(has(self.aws) && has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones) > 0)",message="spec.aws and spec.bgp.availabilityZones are mutually exclusive"
-// +kubebuilder:validation:XValidation:rule="has(self.aws) || (has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones) > 0)",message="spec.bgp.availabilityZones is required when spec.aws is not configured"
+// +kubebuilder:validation:XValidation:rule="(self.platform == 'AWS') == has(self.aws)",message="spec.aws must be set when spec.platform is AWS, and must be absent otherwise"
+// +kubebuilder:validation:XValidation:rule="self.platform != 'Manual' || (has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones) > 0)",message="spec.bgp.availabilityZones is required when spec.platform is Manual"
+// +kubebuilder:validation:XValidation:rule="self.platform == 'Manual' || !has(self.bgp.availabilityZones) || size(self.bgp.availabilityZones) == 0",message="spec.bgp.availabilityZones may only be set when spec.platform is Manual"
 type CUDNBgpConfigSpec struct {
+	// Platform selects which cloud the operator reconciles against and which
+	// cloud-specific block below must be populated.
+	// +kubebuilder:validation:Required
+	Platform           PlatformType      `json:"platform"`
 	BGP                BGPConfig         `json:"bgp"`
 	RouterNodeSelector map[string]string `json:"routerNodeSelector"`
 	AWS                *AWSConfig        `json:"aws,omitempty"`
@@ -109,6 +130,7 @@ type CUDNBgpConfigStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Platform",type="string",JSONPath=".spec.platform"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

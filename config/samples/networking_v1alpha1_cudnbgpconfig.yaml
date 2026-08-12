@@ -3,6 +3,10 @@ kind: CUDNBgpConfig
 metadata:
   name: cluster
 spec:
+  # Which cloud the operator reconciles against. AWS requires spec.aws;
+  # Manual requires spec.bgp.availabilityZones and calls no cloud API.
+  platform: AWS
+
   bgp:
     localASN: 65001                  # terraform output rosa_bgp_asn
     livenessDetection: bgp-keepalive # bfd | bgp-keepalive (default)
@@ -10,17 +14,17 @@ spec:
   routerNodeSelector:
     bgp_router: "true"
 
-  # --- AWS auto-discovery mode ---
-  # When spec.aws is set, the operator discovers Route Server endpoints,
-  # neighbor IPs, and remote ASN automatically. Do NOT set
-  # spec.bgp.availabilityZones in this mode.
+  # --- AWS auto-discovery mode (platform: AWS) ---
+  # The operator discovers Route Server endpoints, neighbor IPs, and remote
+  # ASN automatically. Do NOT set spec.bgp.availabilityZones in this mode.
   aws:
     region: us-east-1                # terraform output aws_region
     routeServerIDs:                  # terraform output vpc1_route_server_ids
       - rs-0abc123456789abcd
 
-  # --- Without cloud integration ---
-  # When spec.aws is absent, specify neighbors explicitly.
+  # --- Without cloud integration (platform: Manual) ---
+  # Specify neighbors explicitly and omit spec.aws.
+  # platform: Manual
   # bgp:
   #   localASN: 65001
   #   availabilityZones:

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"reflect"
@@ -167,6 +168,7 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// Build the cloud platform once if this configuration uses one (Phases 4 and 6).
 	var cloud platform.CloudPlatform
 	var discoveryResult *platform.DiscoveryResult
+	var unmetPrerequisites []string
 	if config.Spec.Platform != networkingv1alpha1.PlatformManual {
 		buildPlatform := r.PlatformBuilder
 		if buildPlatform == nil {
@@ -183,6 +185,34 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 				"CloudDiscoveryFailed", fmt.Sprintf("failed to build %s platform: %v", config.Spec.Platform, err))
 		}
 		cloud = p
+
+		// Prerequisites the operator relies on but does not create. It keeps
+		// reconciling either way, so that fixing one is enough and no second
+		// action is needed, but it will not claim Ready while the path cannot
+		// work.
+		unmetPrerequisites, err = cloud.CheckPrerequisites(ctx)
+		if err != nil {
+			return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionPrerequisitesSatisfied,
+				"CheckFailed", fmt.Sprintf("failed to check cloud prerequisites: %v", err))
+		}
+		if len(unmetPrerequisites) > 0 {
+			log.Info("cloud prerequisites unmet", "count", len(unmetPrerequisites))
+			meta.SetStatusCondition(&config.Status.Conditions, metav1.Condition{
+				Type:               networkingv1alpha1.ConditionPrerequisitesSatisfied,
+				Status:             metav1.ConditionFalse,
+				Reason:             "Unmet",
+				Message:            strings.Join(unmetPrerequisites, "; "),
+				ObservedGeneration: config.Generation,
+			})
+		} else {
+			meta.SetStatusCondition(&config.Status.Conditions, metav1.Condition{
+				Type:               networkingv1alpha1.ConditionPrerequisitesSatisfied,
+				Status:             metav1.ConditionTrue,
+				Reason:             "Satisfied",
+				Message:            "Cloud prerequisites are in place",
+				ObservedGeneration: config.Generation,
+			})
+		}
 
 		// Phase 4: Discover cloud BGP endpoints
 		log.Info("Phase 4: discovering cloud BGP endpoints", "platform", config.Spec.Platform)
@@ -268,8 +298,16 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		})
 	}
 
+	// Everything the operator owns is reconciled. Ready is still withheld
+	// while a prerequisite is missing, because reporting Ready for work we
+	// did rather than for a path that functions is how a cluster ends up
+	// green with no route to a pod.
+	finalPhase := networkingv1alpha1.PhaseReady
+	if len(unmetPrerequisites) > 0 {
+		finalPhase = networkingv1alpha1.PhaseDegraded
+	}
 	if err := r.patchConfigStatus(ctx, config, *baselineStatus, func(c *networkingv1alpha1.CUDNBgpConfig) {
-		c.Status.Phase = networkingv1alpha1.PhaseReady
+		c.Status.Phase = finalPhase
 	}); err != nil {
 		return ctrl.Result{}, err
 	}

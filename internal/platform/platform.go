@@ -60,6 +60,18 @@ type CloudPlatform interface {
 	DiscoverEndpoints(ctx context.Context) (*DiscoveryResult, error)
 	ReconcileNodes(ctx context.Context, nodes []RouterNode) error
 	Cleanup(ctx context.Context) error
+	// CheckPrerequisites reports cloud configuration this operator relies on
+	// but deliberately does not create, returning one human-readable line per
+	// unmet requirement and an empty slice when everything is in place.
+	//
+	// The operator discovers the route server or Cloud Router; it never
+	// provisions them, and that boundary is what keeps it an operator rather
+	// than a replacement for the Terraform that builds the estate. The cost
+	// of the boundary is that a missing prerequisite used to surface only as
+	// sessions that never came up, or worse as BGP that worked perfectly
+	// while nothing could reach a pod. Checking is read-only and lets the
+	// operator say so instead.
+	CheckPrerequisites(ctx context.Context) ([]string, error)
 }
 
 // NodeLifecycle is implemented by platforms that must withdraw cloud state

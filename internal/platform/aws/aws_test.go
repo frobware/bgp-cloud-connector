@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -36,6 +37,7 @@ type mockEC2 struct {
 	createTagsFunc    func(*ec2.CreateTagsInput) (*ec2.CreateTagsOutput, error)
 	describeInstFunc  func(*ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error)
 	modifyENIFunc     func(*ec2.ModifyNetworkInterfaceAttributeInput) (*ec2.ModifyNetworkInterfaceAttributeOutput, error)
+	propagationsFunc  func(*ec2.GetRouteServerPropagationsInput) (*ec2.GetRouteServerPropagationsOutput, error)
 
 	createPeerCalls []*ec2.CreateRouteServerPeerInput
 	deletePeerCalls []*ec2.DeleteRouteServerPeerInput
@@ -108,6 +110,13 @@ func (m *mockEC2) ModifyNetworkInterfaceAttribute(_ context.Context, input *ec2.
 		return m.modifyENIFunc(input)
 	}
 	return &ec2.ModifyNetworkInterfaceAttributeOutput{}, nil
+}
+
+func (m *mockEC2) GetRouteServerPropagations(_ context.Context, input *ec2.GetRouteServerPropagationsInput, _ ...func(*ec2.Options)) (*ec2.GetRouteServerPropagationsOutput, error) {
+	if m.propagationsFunc != nil {
+		return m.propagationsFunc(input)
+	}
+	return &ec2.GetRouteServerPropagationsOutput{}, nil
 }
 
 // --- UT-AWS-01 to UT-AWS-02: Credential Verification ---
@@ -670,5 +679,75 @@ func TestDiscoverEndpoints_APIFailure(t *testing.T) {
 	_, err := p.DiscoverEndpoints(context.Background())
 	if err == nil {
 		t.Fatal("expected error on API failure")
+	}
+}
+
+// --- Prerequisites ---
+
+// TestCheckPrerequisites_NoPropagation is the failure this check exists for.
+// Every peer reaches available, every session establishes, FRR advertises the
+// prefix, and the routes never reach a VPC route table, so nothing in the VPC
+// can reach a pod while every signal looks healthy.
+func TestCheckPrerequisites_NoPropagation(t *testing.T) {
+	mock := &mockEC2{
+		propagationsFunc: func(_ *ec2.GetRouteServerPropagationsInput) (*ec2.GetRouteServerPropagationsOutput, error) {
+			return &ec2.GetRouteServerPropagationsOutput{}, nil
+		},
+	}
+	p := newTestPlatform(mock)
+
+	unmet, err := p.CheckPrerequisites(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(unmet) != 1 {
+		t.Fatalf("expected one unmet prerequisite, got %v", unmet)
+	}
+	if !strings.Contains(unmet[0], "propagates to no route table") {
+		t.Errorf("unhelpful message: %q", unmet[0])
+	}
+}
+
+func TestCheckPrerequisites_Satisfied(t *testing.T) {
+	mock := &mockEC2{
+		propagationsFunc: func(_ *ec2.GetRouteServerPropagationsInput) (*ec2.GetRouteServerPropagationsOutput, error) {
+			return &ec2.GetRouteServerPropagationsOutput{
+				RouteServerPropagations: []ec2types.RouteServerPropagation{
+					{RouteTableId: aws.String("rtb-1"), State: ec2types.RouteServerPropagationStateAvailable},
+				},
+			}, nil
+		},
+	}
+	p := newTestPlatform(mock)
+
+	unmet, err := p.CheckPrerequisites(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(unmet) != 0 {
+		t.Errorf("expected nothing unmet, got %v", unmet)
+	}
+}
+
+// TestCheckPrerequisites_PendingCounts: a propagation still being set up is on
+// its way, and reporting it as missing would flap the condition.
+func TestCheckPrerequisites_PendingCounts(t *testing.T) {
+	mock := &mockEC2{
+		propagationsFunc: func(_ *ec2.GetRouteServerPropagationsInput) (*ec2.GetRouteServerPropagationsOutput, error) {
+			return &ec2.GetRouteServerPropagationsOutput{
+				RouteServerPropagations: []ec2types.RouteServerPropagation{
+					{RouteTableId: aws.String("rtb-1"), State: ec2types.RouteServerPropagationStatePending},
+				},
+			}, nil
+		},
+	}
+	p := newTestPlatform(mock)
+
+	unmet, err := p.CheckPrerequisites(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(unmet) != 0 {
+		t.Errorf("a pending propagation must not read as missing, got %v", unmet)
 	}
 }

@@ -196,6 +196,9 @@ type mockPlatform struct {
 	reconcileNodesErr    error
 	cleanupCalled        bool
 	cleanupErr           error
+	prerequisitesCalled  bool
+	unmetPrerequisites   []string
+	prerequisitesErr     error
 }
 
 func (m *mockPlatform) DiscoverEndpoints(_ context.Context) (*platform.DiscoveryResult, error) {
@@ -236,6 +239,11 @@ func (m *mockPlatform) ReconcileNodes(_ context.Context, nodes []platform.Router
 	m.reconcileNodesCalled = true
 	m.reconcileNodesArgs = nodes
 	return m.reconcileNodesErr
+}
+
+func (m *mockPlatform) CheckPrerequisites(_ context.Context) ([]string, error) {
+	m.prerequisitesCalled = true
+	return m.unmetPrerequisites, m.prerequisitesErr
 }
 
 func (m *mockPlatform) Cleanup(_ context.Context) error {
@@ -330,8 +338,29 @@ func TestConfigReconcile_AWSFullReconcile(t *testing.T) {
 	if updated.Status.Phase != networkingv1alpha1.PhaseReady {
 		t.Errorf("expected Ready, got %s", updated.Status.Phase)
 	}
-	if len(updated.Status.Conditions) != 5 {
-		t.Errorf("expected 5 conditions, got %d", len(updated.Status.Conditions))
+	// Assert the conditions by name rather than by count, so adding one is a
+	// deliberate edit to this list instead of a number that needs bumping.
+	wantConditions := []string{
+		networkingv1alpha1.ConditionNetworkOperatorPatched,
+		networkingv1alpha1.ConditionFRRNamespaceReady,
+		networkingv1alpha1.ConditionPrerequisitesSatisfied,
+		networkingv1alpha1.ConditionCloudEndpointsDiscovered,
+		networkingv1alpha1.ConditionFRRConfigurationApplied,
+		networkingv1alpha1.ConditionCloudResourcesReconciled,
+	}
+	gotConditions := map[string]metav1.ConditionStatus{}
+	for _, cond := range updated.Status.Conditions {
+		gotConditions[cond.Type] = cond.Status
+	}
+	for _, want := range wantConditions {
+		if status, present := gotConditions[want]; !present {
+			t.Errorf("missing condition %s", want)
+		} else if status != metav1.ConditionTrue {
+			t.Errorf("condition %s = %s, want True", want, status)
+		}
+	}
+	if len(gotConditions) != len(wantConditions) {
+		t.Errorf("expected conditions %v, got %v", wantConditions, gotConditions)
 	}
 	if updated.Status.AWS == nil {
 		t.Fatal("expected status.aws to be populated")

@@ -45,6 +45,7 @@ const (
 	ConditionCloudEndpointsDiscovered = "CloudEndpointsDiscovered"
 	ConditionFRRConfigurationApplied  = "FRRConfigurationApplied"
 	ConditionCloudResourcesReconciled = "CloudResourcesReconciled"
+	ConditionPrerequisitesSatisfied   = "PrerequisitesSatisfied"
 )
 
 // PlatformType selects which cloud the operator reconciles BGP peering

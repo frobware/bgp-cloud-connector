@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +34,41 @@ import (
 )
 
 // --- Platform dispatch ---
+
+// TestDefaultPlatformBuilder_EveryEnumValueDispatches walks the platform enum
+// and proves each implemented value reaches its builder. Without it a value
+// can be added to the API and to the CRD while the switch never grows a case:
+// the orphaned builder is still a legal Go function, so nothing fails to
+// compile and every other test passes.
+//
+// Construction is expected to fail here, because these builders read
+// Infrastructure/cluster first and the fake client has none. What must not
+// happen is falling through to the default arm.
+func TestDefaultPlatformBuilder_EveryEnumValueDispatches(t *testing.T) {
+	implemented := []networkingv1alpha1.PlatformType{
+		networkingv1alpha1.PlatformAWS,
+		networkingv1alpha1.PlatformGCP,
+	}
+
+	for _, p := range implemented {
+		t.Run(string(p), func(t *testing.T) {
+			config := newTestCUDNBgpConfigWithAWS()
+			config.Spec.Platform = p
+			config.Spec.GCP = &networkingv1alpha1.GCPConfig{
+				Project:         "proj",
+				Region:          "europe-west1",
+				CloudRouterName: "router",
+				NCC:             networkingv1alpha1.NCCConfig{HubName: "hub", SpokePrefix: "spoke"},
+			}
+			c := fake.NewClientBuilder().WithScheme(configTestScheme()).Build()
+
+			_, err := defaultPlatformBuilder(context.Background(), c, config)
+			if err != nil && strings.Contains(err.Error(), "no platform implementation") {
+				t.Fatalf("%s is in the enum but the builder has no case for it: %v", p, err)
+			}
+		})
+	}
+}
 
 func TestDefaultPlatformBuilder_UnknownPlatform(t *testing.T) {
 	config := newTestCUDNBgpConfigWithAWS()

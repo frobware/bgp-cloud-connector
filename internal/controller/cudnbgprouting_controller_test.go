@@ -158,7 +158,7 @@ func TestRoutingReconcile_NoNamespace(t *testing.T) {
 		NamespacedName: types.NamespacedName{Name: "prod"},
 	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("a problem the user must fix should not be returned as an error: %v", err)
 	}
 	if result.RequeueAfter != 30*time.Second {
 		t.Errorf("expected 30s degraded requeue, got %v", result.RequeueAfter)
@@ -199,7 +199,7 @@ func TestRoutingReconcile_DeleteLastRemovesRA(t *testing.T) {
 		NamespacedName: types.NamespacedName{Name: "prod"},
 	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("a problem the user must fix should not be returned as an error: %v", err)
 	}
 
 	// RA should be deleted since this was the last routing CR
@@ -248,7 +248,7 @@ func TestRoutingReconcile_DeleteKeepsRAWhenOthersExist(t *testing.T) {
 		NamespacedName: types.NamespacedName{Name: "prod"},
 	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("a problem the user must fix should not be returned as an error: %v", err)
 	}
 
 	// RA should still exist since "staging" routing CR remains
@@ -283,7 +283,7 @@ func TestRoutingReconcile_DuplicateNetworkName(t *testing.T) {
 		NamespacedName: types.NamespacedName{Name: "prod"},
 	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("a problem the user must fix should not be returned as an error: %v", err)
 	}
 	if result.RequeueAfter != 30*time.Second {
 		t.Errorf("expected 30s degraded requeue, got %v", result.RequeueAfter)

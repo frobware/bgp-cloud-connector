@@ -83,7 +83,7 @@ func (r *CUDNBgpRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	for i := range routingList.Items {
 		other := &routingList.Items[i]
 		if other.Name != routing.Name && other.Spec.Network.Name == routing.Spec.Network.Name {
-			return r.setDegraded(ctx, routing, *baselineStatus, networkingv1alpha1.ConditionCUDNCreated,
+			return r.setBlocked(ctx, routing, *baselineStatus, networkingv1alpha1.ConditionCUDNCreated,
 				"DuplicateNetwork",
 				fmt.Sprintf("spec.network.name %q already claimed by CUDNBgpRouting %q", routing.Spec.Network.Name, other.Name))
 		}
@@ -115,7 +115,7 @@ func (r *CUDNBgpRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Phase 1: Validate namespace labels + ensure CUDN
 	log.Info("Phase 1: validating namespace and ensuring CUDN", "network", routing.Spec.Network.Name)
 	if err := ValidateNamespaceLabels(ctx, r.Client, routing.Spec.Network.Name); err != nil {
-		return r.setDegraded(ctx, routing, *baselineStatus, networkingv1alpha1.ConditionCUDNCreated,
+		return r.setBlocked(ctx, routing, *baselineStatus, networkingv1alpha1.ConditionCUDNCreated,
 			"NamespaceNotReady", fmt.Sprintf("namespace validation failed: %v", err))
 	}
 	if err := EnsureCUDN(ctx, r.Client, routing); err != nil {
@@ -192,6 +192,31 @@ func (r *CUDNBgpRoutingReconciler) reconcileDelete(ctx context.Context, routing 
 	return ctrl.Result{}, nil
 }
 
+// setBlocked reports a problem only a person can fix. See the equivalent on
+// the config controller for why these do not return an error.
+func (r *CUDNBgpRoutingReconciler) setBlocked(
+	ctx context.Context,
+	routing *networkingv1alpha1.CUDNBgpRouting,
+	baselineStatus networkingv1alpha1.CUDNBgpRoutingStatus,
+	condType, reason, message string,
+) (ctrl.Result, error) {
+	logf.FromContext(ctx).Info("waiting for the configuration to be corrected", "reason", reason, "message", message)
+
+	if err := r.patchRoutingStatus(ctx, routing, baselineStatus, func(c *networkingv1alpha1.CUDNBgpRouting) {
+		c.Status.Phase = networkingv1alpha1.PhaseDegraded
+		meta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
+			Type:               condType,
+			Status:             metav1.ConditionFalse,
+			Reason:             reason,
+			Message:            message,
+			ObservedGeneration: c.Generation,
+		})
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
 func (r *CUDNBgpRoutingReconciler) setDegraded(
 	ctx context.Context,
 	routing *networkingv1alpha1.CUDNBgpRouting,
@@ -212,7 +237,9 @@ func (r *CUDNBgpRoutingReconciler) setDegraded(
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	// See the note on the config controller: a nil error discards the
+	// workqueue's backoff and retries a failing operation at a fixed rate.
+	return ctrl.Result{}, fmt.Errorf("%s: %s", reason, message)
 }
 
 func (r *CUDNBgpRoutingReconciler) SetupWithManager(mgr ctrl.Manager) error {

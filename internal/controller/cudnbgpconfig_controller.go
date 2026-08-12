@@ -85,7 +85,7 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	baselineStatus := config.Status.DeepCopy()
 
 	if config.Name != SingletonName {
-		return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionNetworkOperatorPatched,
+		return r.setBlocked(ctx, config, *baselineStatus, networkingv1alpha1.ConditionNetworkOperatorPatched,
 			"InvalidName", fmt.Sprintf("CUDNBgpConfig must be named %q, got %q", SingletonName, config.Name))
 	}
 
@@ -516,6 +516,39 @@ func (r *CUDNBgpConfigReconciler) reconcileDelete(ctx context.Context, config *n
 	return ctrl.Result{}, nil
 }
 
+// setBlocked reports a problem only a person can fix: a misnamed object, a
+// missing namespace, a name already claimed. It records the condition and
+// polls, but returns no error.
+//
+// The distinction from setDegraded is about what the caller should do next.
+// A cloud API that failed deserves the workqueue's exponential backoff and a
+// place in the error metrics. A spec someone has to edit deserves neither:
+// backing off exponentially makes the eventual fix slower to take effect, and
+// counting it as a reconcile error misreports operator health as broken when
+// it is correctly reporting bad input.
+func (r *CUDNBgpConfigReconciler) setBlocked(
+	ctx context.Context,
+	config *networkingv1alpha1.CUDNBgpConfig,
+	baselineStatus networkingv1alpha1.CUDNBgpConfigStatus,
+	condType, reason, message string,
+) (ctrl.Result, error) {
+	logf.FromContext(ctx).Info("waiting for the configuration to be corrected", "reason", reason, "message", message)
+
+	if err := r.patchConfigStatus(ctx, config, baselineStatus, func(c *networkingv1alpha1.CUDNBgpConfig) {
+		c.Status.Phase = networkingv1alpha1.PhaseDegraded
+		meta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
+			Type:               condType,
+			Status:             metav1.ConditionFalse,
+			Reason:             reason,
+			Message:            message,
+			ObservedGeneration: c.Generation,
+		})
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
 func (r *CUDNBgpConfigReconciler) setDegraded(
 	ctx context.Context,
 	config *networkingv1alpha1.CUDNBgpConfig,
@@ -536,7 +569,12 @@ func (r *CUDNBgpConfigReconciler) setDegraded(
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	// Return the failure rather than a fixed requeue. A nil error tells
+	// controller-runtime the pass succeeded, which throws away its
+	// exponential backoff and pins a broken operator to a constant poll of
+	// whatever is failing. Against a cloud API that is a permanent draw on a
+	// rate bucket shared by the whole account.
+	return ctrl.Result{}, fmt.Errorf("%s: %s", reason, message)
 }
 
 func nodeRelevantChangePredicate() predicate.Predicate {

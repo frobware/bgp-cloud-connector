@@ -28,7 +28,7 @@ import (
 	"github.com/openshift/bgp-cloud-connector/internal/platform"
 )
 
-const routerNodeLabel = "bgp_router"
+const routerNodeLabel = "networking.openshift.io/cudn-bgp-router"
 
 func liveReconcileConfig(t *testing.T) Config {
 	t.Helper()
@@ -77,11 +77,11 @@ func liveRouterNodes(t *testing.T) ([]platform.RouterNode, client.Client) {
 	}
 
 	var nodes corev1.NodeList
-	if err := coreClient.List(context.Background(), &nodes, client.MatchingLabels{routerNodeLabel: "true"}); err != nil {
+	if err := coreClient.List(context.Background(), &nodes, client.MatchingLabels{routerNodeLabel: ""}); err != nil {
 		t.Fatalf("listing nodes: %v", err)
 	}
 	if len(nodes.Items) == 0 {
-		t.Skipf("no nodes carry %s=true", routerNodeLabel)
+		t.Skipf("no nodes carry %s", routerNodeLabel)
 	}
 
 	out := make([]platform.RouterNode, 0, len(nodes.Items))

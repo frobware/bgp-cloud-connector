@@ -14,4 +14,4 @@ spec:
         nodeSelector: {}
 
   routerNodeSelector:
-    bgp_router: "true"
+    networking.openshift.io/cudn-bgp-router: ""

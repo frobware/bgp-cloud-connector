@@ -73,7 +73,7 @@ func newReadyCUDNBgpConfig() *networkingv1alpha1.CUDNBgpConfig {
 					},
 				},
 			},
-			RouterNodeSelector: map[string]string{"bgp_router": "true"},
+			RouterNodeSelector: map[string]string{"networking.openshift.io/cudn-bgp-router": ""},
 		},
 		Status: networkingv1alpha1.CUDNBgpConfigStatus{
 			Phase: networkingv1alpha1.PhaseReady,

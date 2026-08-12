@@ -12,7 +12,7 @@ spec:
     livenessDetection: bgp-keepalive # bfd | bgp-keepalive (default)
 
   routerNodeSelector:
-    bgp_router: "true"
+    networking.openshift.io/cudn-bgp-router: ""
 
   # --- AWS auto-discovery mode (platform: AWS) ---
   # The operator discovers Route Server endpoints, neighbor IPs, and remote

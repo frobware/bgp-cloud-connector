@@ -9,7 +9,7 @@ spec:
     livenessDetection: bgp-keepalive
 
   routerNodeSelector:
-    bgp_router: "true"
+    networking.openshift.io/cudn-bgp-router: ""
 
   aws:
     region: us-east-1

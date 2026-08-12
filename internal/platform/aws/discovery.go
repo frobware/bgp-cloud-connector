@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -74,8 +75,31 @@ func (p *Platform) DiscoverEndpoints(ctx context.Context) (*platform.DiscoveryRe
 		result.RouteServers = append(result.RouteServers, discoveredRS)
 	}
 
+	result.PeerGroups = peerGroupsByAZ(result.NeighborsByAZ)
+
 	p.endpointsByAZ = result.EndpointsByAZ
 	return result, nil
+}
+
+// peerGroupsByAZ renders discovered neighbours as one peer group per
+// availability zone, ordered by AZ name so that generated object names are
+// stable across reconciles.
+func peerGroupsByAZ(neighborsByAZ map[string][]platform.DiscoveredNeighbor) []platform.PeerGroup {
+	azNames := make([]string, 0, len(neighborsByAZ))
+	for az := range neighborsByAZ {
+		azNames = append(azNames, az)
+	}
+	sort.Strings(azNames)
+
+	groups := make([]platform.PeerGroup, 0, len(azNames))
+	for _, az := range azNames {
+		groups = append(groups, platform.PeerGroup{
+			Key:          az,
+			NodeSelector: map[string]string{"topology.kubernetes.io/zone": az},
+			Neighbors:    neighborsByAZ[az],
+		})
+	}
+	return groups
 }
 
 func (p *Platform) describeRouteServer(ctx context.Context, routeServerID string) (*ec2types.RouteServer, error) {

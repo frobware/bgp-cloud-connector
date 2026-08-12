@@ -26,7 +26,31 @@ type DiscoveredRouteServer struct {
 	Endpoints     []DiscoveredEndpoint
 }
 
+// PeerGroup is a set of router nodes sharing a BGP neighbour set. Each group
+// becomes one FRRConfiguration. Clouds group differently: AWS peers per
+// availability zone, so it emits one group per AZ; a cloud whose router
+// addresses are identical for every node needs only a single group.
+type PeerGroup struct {
+	// Key identifies the group in cloud-meaningful terms (an AZ name, a node
+	// name) and appears in diagnostics. Generated object names come from the
+	// group's position in DiscoveryResult.PeerGroups, so a platform must emit
+	// groups in a stable order.
+	Key string
+	// NodeSelector narrows spec.routerNodeSelector to this group's nodes. It
+	// is merged over the base selector.
+	NodeSelector map[string]string
+	Neighbors    []DiscoveredNeighbor
+	// RawFRRConfig, when non-empty, becomes spec.raw.rawConfig on the
+	// generated FRRConfiguration. Some clouds need FRR directives the
+	// structured neighbour API does not express.
+	RawFRRConfig string
+}
+
 type DiscoveryResult struct {
+	// PeerGroups is what the controller renders into FRRConfigurations.
+	PeerGroups []PeerGroup
+
+	// The fields below are AWS-shaped and feed status reporting only.
 	RouteServers  []DiscoveredRouteServer
 	NeighborsByAZ map[string][]DiscoveredNeighbor
 	EndpointsByAZ map[string][]string

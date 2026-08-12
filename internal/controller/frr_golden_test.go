@@ -184,21 +184,27 @@ func TestGoldenFRRFromDiscovery(t *testing.T) {
 	c := frrTestClient(t)
 
 	config := goldenConfig(networkingv1alpha1.LivenessDetectionBGPKeepalive)
-	dr := &platform.DiscoveryResult{
-		NeighborsByAZ: map[string][]platform.DiscoveredNeighbor{
-			"eu-central-1a": {
+	groups := []platform.PeerGroup{
+		{
+			Key:          "eu-central-1a",
+			NodeSelector: map[string]string{"topology.kubernetes.io/zone": "eu-central-1a"},
+			Neighbors: []platform.DiscoveredNeighbor{
 				{Address: "10.0.1.10", ASN: 65000},
 				{Address: "10.0.1.11", ASN: 65000},
 			},
-			"eu-central-1b": {
+		},
+		{
+			Key:          "eu-central-1b",
+			NodeSelector: map[string]string{"topology.kubernetes.io/zone": "eu-central-1b"},
+			Neighbors: []platform.DiscoveredNeighbor{
 				{Address: "10.0.2.10", ASN: 65000},
 			},
 		},
 	}
 
-	count, err := EnsureFRRConfigurationsFromDiscovery(ctx, c, config, dr)
+	count, err := EnsureFRRConfigurationsFromGroups(ctx, c, config, groups)
 	if err != nil {
-		t.Fatalf("EnsureFRRConfigurationsFromDiscovery: %v", err)
+		t.Fatalf("EnsureFRRConfigurationsFromGroups: %v", err)
 	}
 	if count != 2 {
 		t.Errorf("expected 2 configurations, got %d", count)

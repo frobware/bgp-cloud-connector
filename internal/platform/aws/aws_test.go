@@ -592,6 +592,70 @@ func TestDiscoverEndpoints_MultipleRouteServers(t *testing.T) {
 	}
 }
 
+// TestDiscoverEndpoints_PeerGroups pins the peering plan the controller
+// renders into FRRConfigurations: one group per availability zone, ordered by
+// AZ name so the generated object names stay stable across reconciles.
+func TestDiscoverEndpoints_PeerGroups(t *testing.T) {
+	mock := &mockEC2{
+		describeRSFunc: func(input *ec2.DescribeRouteServersInput) (*ec2.DescribeRouteServersOutput, error) {
+			return &ec2.DescribeRouteServersOutput{
+				RouteServers: []ec2types.RouteServer{
+					{RouteServerId: aws.String(input.RouteServerIds[0]), AmazonSideAsn: aws.Int64(64512)},
+				},
+			}, nil
+		},
+		describeRSEFunc: func(_ *ec2.DescribeRouteServerEndpointsInput) (*ec2.DescribeRouteServerEndpointsOutput, error) {
+			// Deliberately out of AZ order to prove the grouping sorts.
+			return &ec2.DescribeRouteServerEndpointsOutput{
+				RouteServerEndpoints: []ec2types.RouteServerEndpoint{
+					{RouteServerEndpointId: aws.String("rse-c"), RouteServerId: aws.String("rs-1"), SubnetId: aws.String("subnet-c"), EniAddress: aws.String("10.0.3.10")},
+					{RouteServerEndpointId: aws.String("rse-a"), RouteServerId: aws.String("rs-1"), SubnetId: aws.String("subnet-a"), EniAddress: aws.String("10.0.1.10")},
+					{RouteServerEndpointId: aws.String("rse-b"), RouteServerId: aws.String("rs-1"), SubnetId: aws.String("subnet-b"), EniAddress: aws.String("10.0.2.10")},
+				},
+			}, nil
+		},
+		describeSubFunc: func(_ *ec2.DescribeSubnetsInput) (*ec2.DescribeSubnetsOutput, error) {
+			return &ec2.DescribeSubnetsOutput{
+				Subnets: []ec2types.Subnet{
+					{SubnetId: aws.String("subnet-a"), AvailabilityZone: aws.String("us-east-1a")},
+					{SubnetId: aws.String("subnet-b"), AvailabilityZone: aws.String("us-east-1b")},
+					{SubnetId: aws.String("subnet-c"), AvailabilityZone: aws.String("us-east-1c")},
+				},
+			}, nil
+		},
+	}
+
+	p := &Platform{ec2Client: mock, routeServerIDs: []string{"rs-1"}}
+
+	result, err := p.DiscoverEndpoints(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantKeys := []string{"us-east-1a", "us-east-1b", "us-east-1c"}
+	if len(result.PeerGroups) != len(wantKeys) {
+		t.Fatalf("expected %d peer groups, got %d", len(wantKeys), len(result.PeerGroups))
+	}
+	for i, want := range wantKeys {
+		group := result.PeerGroups[i]
+		if group.Key != want {
+			t.Errorf("group %d: expected key %q, got %q", i, want, group.Key)
+		}
+		if got := group.NodeSelector["topology.kubernetes.io/zone"]; got != want {
+			t.Errorf("group %d: expected zone selector %q, got %q", i, want, got)
+		}
+		if len(group.Neighbors) != 1 {
+			t.Fatalf("group %d: expected 1 neighbour, got %d", i, len(group.Neighbors))
+		}
+		if group.Neighbors[0].ASN != 64512 {
+			t.Errorf("group %d: expected ASN 64512, got %d", i, group.Neighbors[0].ASN)
+		}
+		if group.RawFRRConfig != "" {
+			t.Errorf("group %d: AWS should emit no raw FRR config, got %q", i, group.RawFRRConfig)
+		}
+	}
+}
+
 func TestDiscoverEndpoints_APIFailure(t *testing.T) {
 	mock := &mockEC2{
 		describeRSFunc: func(_ *ec2.DescribeRouteServersInput) (*ec2.DescribeRouteServersOutput, error) {

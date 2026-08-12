@@ -178,11 +178,11 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		})
 	}
 
-	// Phase 4: Apply FRR Configuration per AZ
+	// Phase 4: Apply FRR Configuration per peer group
 	log.Info("Phase 4: applying FRR configurations")
 	var frrCount int
 	if config.Spec.AWS != nil && discoveryResult != nil {
-		frrCount, err = EnsureFRRConfigurationsFromDiscovery(ctx, r.Client, config, discoveryResult)
+		frrCount, err = EnsureFRRConfigurationsFromGroups(ctx, r.Client, config, discoveryResult.PeerGroups)
 	} else {
 		frrCount = len(config.Spec.BGP.AvailabilityZones)
 		err = EnsureFRRConfigurations(ctx, r.Client, config)

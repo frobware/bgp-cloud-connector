@@ -22,9 +22,12 @@ import (
 	"sort"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 
 	networkingv1alpha1 "github.com/openshift/bgp-cloud-connector/api/v1alpha1"
 )
@@ -56,8 +59,48 @@ func (r *CUDNBgpConfigReconciler) patchConfigStatus(
 		return nil
 	}
 
+	emitConditionEvents(r.Recorder, config, baselineStatus.Conditions, desired.Status.Conditions)
+
 	config.Status = desired.Status
 	return r.Status().Update(ctx, config)
+}
+
+// emitConditionEvents announces conditions that changed.
+//
+// Conditions say what is true now; events say what changed, and the change is
+// what a person wants when they run oc describe. Emitting from the one place
+// status is written, and only for conditions whose status or reason actually
+// moved, is what keeps the five minute resync from republishing the same set
+// forever and burying the transition that mattered.
+//
+// A nil recorder is tolerated so a unit test that does not care about events
+// need not supply one.
+func emitConditionEvents(
+	recorder record.EventRecorder,
+	object runtime.Object,
+	before, after []metav1.Condition,
+) {
+	if recorder == nil {
+		return
+	}
+	for i := range after {
+		cond := after[i]
+		old := meta.FindStatusCondition(before, cond.Type)
+		// The message is compared as well as the status and reason, because
+		// the router set growing or shrinking moves neither of those: every
+		// condition stays True with the same reason and only the node count
+		// in the message changes. That is exactly the transition worth
+		// announcing. It is safe to compare because these messages are
+		// derived from the reconcile's inputs and carry nothing volatile.
+		if old != nil && old.Status == cond.Status && old.Reason == cond.Reason && old.Message == cond.Message {
+			continue
+		}
+		eventType := corev1.EventTypeNormal
+		if cond.Status != metav1.ConditionTrue {
+			eventType = corev1.EventTypeWarning
+		}
+		recorder.Eventf(object, eventType, cond.Reason, "%s: %s", cond.Type, cond.Message)
+	}
 }
 
 // patchRoutingStatus updates status when desired differs from the etcd baseline.
@@ -76,6 +119,8 @@ func (r *CUDNBgpRoutingReconciler) patchRoutingStatus(
 		routing.Status = desired.Status
 		return nil
 	}
+
+	emitConditionEvents(r.Recorder, routing, baselineStatus.Conditions, desired.Status.Conditions)
 
 	routing.Status = desired.Status
 	return r.Status().Update(ctx, routing)

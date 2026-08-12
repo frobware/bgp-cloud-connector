@@ -209,10 +209,33 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudResourcesReconciled,
 				"CloudReconcileFailed", fmt.Sprintf("failed to list router nodes: %v", err))
 		}
+		// Nodes whose Machine is terminating are held and excluded, so that
+		// reconciliation tears their peers down before the instance goes away.
+		// Platforms that do not implement NodeLifecycle hold nothing.
+		lifecycle, hasLifecycle := cloud.(platform.NodeLifecycle)
+		var held []platform.RouterNode
+		if hasLifecycle {
+			held, err = lifecycle.HoldTerminating(ctx, nodes)
+			if err != nil {
+				return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudResourcesReconciled,
+					"CloudReconcileFailed", fmt.Sprintf("failed to hold terminating nodes: %v", err))
+			}
+			nodes = excludeNodes(nodes, held)
+		}
+
 		if err := cloud.ReconcileNodes(ctx, nodes); err != nil {
 			return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudResourcesReconciled,
 				"CloudReconcileFailed", fmt.Sprintf("failed to reconcile cloud resources: %v", err))
 		}
+
+		if len(held) > 0 {
+			if err := lifecycle.ReleaseTerminating(ctx, held); err != nil {
+				return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudResourcesReconciled,
+					"CloudReconcileFailed", fmt.Sprintf("failed to release terminating nodes: %v", err))
+			}
+			log.Info("released terminating router nodes", "count", len(held))
+		}
+
 		meta.SetStatusCondition(&config.Status.Conditions, metav1.Condition{
 			Type:               networkingv1alpha1.ConditionCloudResourcesReconciled,
 			Status:             metav1.ConditionTrue,
@@ -249,6 +272,25 @@ func discoveryResultToStatus(dr *platform.DiscoveryResult) *networkingv1alpha1.A
 		status.RouteServers = append(status.RouteServers, drs)
 	}
 	return status
+}
+
+// excludeNodes returns nodes with everything in remove filtered out, matching
+// on node name.
+func excludeNodes(nodes, remove []platform.RouterNode) []platform.RouterNode {
+	if len(remove) == 0 {
+		return nodes
+	}
+	excluded := make(map[string]struct{}, len(remove))
+	for _, n := range remove {
+		excluded[n.Name] = struct{}{}
+	}
+	kept := make([]platform.RouterNode, 0, len(nodes))
+	for _, n := range nodes {
+		if _, skip := excluded[n.Name]; !skip {
+			kept = append(kept, n)
+		}
+	}
+	return kept
 }
 
 // defaultPlatformBuilder constructs the cloud platform named by

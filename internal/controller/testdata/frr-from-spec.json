@@ -1,0 +1,88 @@
+[
+  {
+    "apiVersion": "frrk8s.metallb.io/v1beta1",
+    "kind": "FRRConfiguration",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/managed-by": "cudn-bgp-routing-operator"
+      },
+      "name": "cudn-bgp-az-1",
+      "namespace": "openshift-frr-k8s"
+    },
+    "spec": {
+      "bgp": {
+        "routers": [
+          {
+            "asn": 65001,
+            "neighbors": [
+              {
+                "address": "10.0.1.10",
+                "asn": 65000,
+                "disableMP": true,
+                "toReceive": {
+                  "allowed": {
+                    "mode": "all"
+                  }
+                }
+              },
+              {
+                "address": "10.0.1.11",
+                "asn": 65000,
+                "disableMP": true,
+                "toReceive": {
+                  "allowed": {
+                    "mode": "all"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "nodeSelector": {
+        "matchLabels": {
+          "bgp-router": "true",
+          "topology.kubernetes.io/zone": "eu-central-1a"
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "frrk8s.metallb.io/v1beta1",
+    "kind": "FRRConfiguration",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/managed-by": "cudn-bgp-routing-operator"
+      },
+      "name": "cudn-bgp-az-2",
+      "namespace": "openshift-frr-k8s"
+    },
+    "spec": {
+      "bgp": {
+        "routers": [
+          {
+            "asn": 65001,
+            "neighbors": [
+              {
+                "address": "10.0.2.10",
+                "asn": 65000,
+                "disableMP": true,
+                "toReceive": {
+                  "allowed": {
+                    "mode": "all"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "nodeSelector": {
+        "matchLabels": {
+          "bgp-router": "true",
+          "topology.kubernetes.io/zone": "eu-central-1b"
+        }
+      }
+    }
+  }
+]

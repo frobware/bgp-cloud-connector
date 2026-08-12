@@ -226,7 +226,6 @@ spec:
     availabilityZones:
       - nodeSelector:
           topology.kubernetes.io/zone: us-east-1a
-          networking.openshift.io/cudn-bgp-subnet: "1"
         neighbors:
           - address: 10.0.1.47       # terraform output vpc1-rs1-subnet1-ep1_ip
             remoteASN: 64512         # terraform output vpc1-rs1-asn
@@ -234,7 +233,6 @@ spec:
             remoteASN: 64512
       - nodeSelector:
           topology.kubernetes.io/zone: us-east-1b
-          networking.openshift.io/cudn-bgp-subnet: "2"
         neighbors:
           - address: 10.0.2.91       # terraform output vpc1-rs1-subnet2-ep1_ip
             remoteASN: 64512
@@ -242,7 +240,6 @@ spec:
             remoteASN: 64512
       - nodeSelector:
           topology.kubernetes.io/zone: us-east-1c
-          networking.openshift.io/cudn-bgp-subnet: "3"
         neighbors:
           - address: 10.0.3.62       # terraform output vpc1-rs1-subnet3-ep1_ip
             remoteASN: 64512
@@ -316,7 +313,7 @@ spec:
 | `spec.bgp.localASN` | Yes | AS number for the OCP FRR routers. From `terraform output rosa_bgp_asn`. |
 | `spec.bgp.livenessDetection` | No | `bfd` or `bgp-keepalive` (default). Applies to all neighbors. BFD detects peer failure in ~1s (300ms interval × 3 multiplier). BGP keepalive detects peer failure in ~90s (default hold time). Each AZ has 2 RS endpoints, so failover on a single peer failure is automatic. |
 | `spec.bgp.availabilityZones[]` | If `spec.aws` absent | Per-AZ BGP peering groups with explicit neighbor addresses. Required when `spec.aws` is absent. **Must not be set when `spec.aws` is present** — the two are mutually exclusive (CRD-enforced). |
-| `spec.bgp.availabilityZones[].nodeSelector` | If `availabilityZones` set | Labels selecting BGP-enabled worker nodes in this AZ (e.g. `topology.kubernetes.io/zone`, `networking.openshift.io/cudn-bgp-subnet`). |
+| `spec.bgp.availabilityZones[].nodeSelector` | If `availabilityZones` set | Labels selecting BGP-enabled worker nodes in this AZ, normally `topology.kubernetes.io/zone`. |
 | `spec.bgp.availabilityZones[].neighbors[]` | If `availabilityZones` set | BGP neighbor IPs and ASN in this AZ's subnet. |
 | `spec.aws.region` | If `spec.aws` set | AWS region where the ROSA cluster and Route Server are deployed. |
 | `spec.aws.routeServerIDs[]` | If `spec.aws` set | Route Server IDs for auto-discovery. The operator discovers all endpoints, their ENI addresses (BGP neighbor IPs), AZs (via subnet), and remote ASN. From `terraform output`. |
@@ -376,7 +373,6 @@ spec:
     matchLabels:
       networking.openshift.io/cudn-bgp-router: ""
       topology.kubernetes.io/zone: us-east-1a
-      networking.openshift.io/cudn-bgp-subnet: "1"
   bgp:
     routers:
       - asn: 65001
@@ -406,7 +402,6 @@ spec:
     matchLabels:
       networking.openshift.io/cudn-bgp-router: ""
       topology.kubernetes.io/zone: us-east-1b
-      networking.openshift.io/cudn-bgp-subnet: "2"
   bgp:
     routers:
       - asn: 65001
@@ -436,7 +431,6 @@ spec:
     matchLabels:
       networking.openshift.io/cudn-bgp-router: ""
       topology.kubernetes.io/zone: us-east-1c
-      networking.openshift.io/cudn-bgp-subnet: "3"
   bgp:
     routers:
       - asn: 65001

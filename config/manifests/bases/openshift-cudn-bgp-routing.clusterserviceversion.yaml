@@ -14,7 +14,7 @@ metadata:
               "livenessDetection": "bgp-keepalive",
               "availabilityZones": [
                 {
-                  "nodeSelector": {"networking.openshift.io/cudn-bgp-subnet": "1"},
+                  "nodeSelector": {"topology.kubernetes.io/zone": "us-east-1a"},
                   "neighbors": [
                     {"address": "10.0.1.47", "remoteASN": 64512},
                     {"address": "10.0.1.183", "remoteASN": 64512}

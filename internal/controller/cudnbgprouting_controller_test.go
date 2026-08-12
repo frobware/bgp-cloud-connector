@@ -68,7 +68,7 @@ func newReadyCUDNBgpConfig() *networkingv1alpha1.CUDNBgpConfig {
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,
 				AvailabilityZones: []networkingv1alpha1.AvailabilityZone{
 					{
-						NodeSelector: map[string]string{"networking.openshift.io/cudn-bgp-subnet": "1"},
+						NodeSelector: map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
 						Neighbors:    []networkingv1alpha1.BGPNeighbor{{Address: "10.0.1.47", RemoteASN: 64512}},
 					},
 				},

@@ -30,7 +30,6 @@ spec:
   #   availabilityZones:
   #     - nodeSelector:
   #         topology.kubernetes.io/zone: us-east-1a
-  #         networking.openshift.io/cudn-bgp-subnet: "1"
   #       neighbors:
   #         - address: 10.0.1.47
   #           remoteASN: 64512
@@ -38,7 +37,6 @@ spec:
   #           remoteASN: 64512
   #     - nodeSelector:
   #         topology.kubernetes.io/zone: us-east-1b
-  #         networking.openshift.io/cudn-bgp-subnet: "2"
   #       neighbors:
   #         - address: 10.0.2.91
   #           remoteASN: 64512
@@ -46,7 +44,6 @@ spec:
   #           remoteASN: 64512
   #     - nodeSelector:
   #         topology.kubernetes.io/zone: us-east-1c
-  #         networking.openshift.io/cudn-bgp-subnet: "3"
   #       neighbors:
   #         - address: 10.0.3.62
   #           remoteASN: 64512

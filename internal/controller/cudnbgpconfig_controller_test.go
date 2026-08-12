@@ -222,6 +222,13 @@ func (m *mockPlatform) DiscoverEndpoints(_ context.Context) (*platform.Discovery
 		EndpointsByAZ: map[string][]string{
 			"us-east-1a": {"rse-001"},
 		},
+		PeerGroups: []platform.PeerGroup{
+			{
+				Key:          "us-east-1a",
+				NodeSelector: map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
+				Neighbors:    []platform.DiscoveredNeighbor{{Address: "10.0.1.47", ASN: 64512}},
+			},
+		},
 	}, nil
 }
 

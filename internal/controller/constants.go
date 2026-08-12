@@ -30,6 +30,10 @@ const (
 	CUDNNamePrefix         = "cluster-udn-"
 	RouteAdvertisementName = "cudn-bgp-route-advertisements"
 
+	// RawFRRConfigPriority orders a platform's raw FRR block against the
+	// generated configuration and against the FRR CRs OVN-K writes itself.
+	RawFRRConfigPriority = 20
+
 	LabelManagedBy    = "app.kubernetes.io/managed-by"
 	LabelManagedByVal = "cudn-bgp-routing-operator"
 	LabelCUDN         = "cluster-udn"

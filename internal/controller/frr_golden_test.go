@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -238,6 +239,57 @@ func TestGoldenFRRRawConfig(t *testing.T) {
 		t.Fatalf("EnsureFRRConfigurationsFromGroups: %v", err)
 	}
 	assertGolden(t, "frr-raw-config.json", dumpFRRConfigurations(t, ctx, c))
+}
+
+// TestGoldenFRRMultiHop pins the per-neighbour eBGP multihop option.
+//
+// Azure Route Server peers are not on the node's link, so its working
+// configuration carries ebgpMultiHop on every neighbour. Unlike GCP's
+// disable-connected-check, frr-k8s expresses this as a structured field, so it
+// belongs on the neighbour rather than in a raw block.
+func TestGoldenFRRMultiHop(t *testing.T) {
+	ctx := context.Background()
+	c := frrTestClient(t)
+
+	config := goldenConfig(networkingv1alpha1.LivenessDetectionBGPKeepalive)
+	groups := []platform.PeerGroup{
+		{
+			Key: "route-server",
+			Neighbors: []platform.DiscoveredNeighbor{
+				{Address: "10.0.1.4", ASN: 65515, EBGPMultiHop: true},
+				{Address: "10.0.1.5", ASN: 65515, EBGPMultiHop: true},
+			},
+		},
+	}
+
+	if _, err := EnsureFRRConfigurationsFromGroups(ctx, c, config, groups); err != nil {
+		t.Fatalf("EnsureFRRConfigurationsFromGroups: %v", err)
+	}
+	assertGolden(t, "frr-multihop.json", dumpFRRConfigurations(t, ctx, c))
+}
+
+// TestGoldenFRRMultiHopOmittedWhenUnset pins that a neighbour not asking for
+// multihop emits no ebgpMultiHop key at all. frr-k8s defaults it to false, and
+// writing it explicitly would churn every FRRConfiguration on both existing
+// clouds for no behavioural change.
+func TestGoldenFRRMultiHopOmittedWhenUnset(t *testing.T) {
+	ctx := context.Background()
+	c := frrTestClient(t)
+
+	config := goldenConfig(networkingv1alpha1.LivenessDetectionBGPKeepalive)
+	groups := []platform.PeerGroup{
+		{
+			Key:       "route-server",
+			Neighbors: []platform.DiscoveredNeighbor{{Address: "10.0.1.6", ASN: 64512}},
+		},
+	}
+
+	if _, err := EnsureFRRConfigurationsFromGroups(ctx, c, config, groups); err != nil {
+		t.Fatalf("EnsureFRRConfigurationsFromGroups: %v", err)
+	}
+	if got := dumpFRRConfigurations(t, ctx, c); strings.Contains(got, "ebgpMultiHop") {
+		t.Errorf("expected no ebgpMultiHop key for a neighbour that did not ask for it:\n%s", got)
+	}
 }
 
 // TestGoldenFRRPrunesStale pins the pruning behaviour: a configuration that is

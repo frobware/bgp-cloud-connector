@@ -100,6 +100,12 @@ spec:
                             properties:
                               address:
                                 type: string
+                              ebgpMultiHop:
+                                description: |-
+                                  EBGPMultiHop allows the session to be established with a peer that is
+                                  not on this node's link. Azure Route Server needs it; AWS Route Server
+                                  and GCP Cloud Router do not.
+                                type: boolean
                               remoteASN:
                                 format: int64
                                 maximum: 4294967295

@@ -12,6 +12,13 @@ type RouterNode struct {
 type DiscoveredNeighbor struct {
 	Address string
 	ASN     int64
+	// EBGPMultiHop allows the session to be established with a peer that is
+	// not on the node's link. Azure Route Server needs it; AWS and GCP do
+	// not. It is a structured field in frr-k8s, so it belongs on the
+	// neighbour rather than in a peer group's RawFRRConfig -- that escape
+	// hatch is for directives frr-k8s cannot express at all, such as GCP's
+	// disable-connected-check.
+	EBGPMultiHop bool
 }
 
 type DiscoveredEndpoint struct {

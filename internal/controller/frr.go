@@ -72,8 +72,9 @@ func peerGroupsFromSpec(config *networkingv1alpha1.CUDNBgpConfig) []platform.Pee
 		}
 		for _, n := range az.Neighbors {
 			group.Neighbors = append(group.Neighbors, platform.DiscoveredNeighbor{
-				Address: n.Address,
-				ASN:     n.RemoteASN,
+				Address:      n.Address,
+				ASN:          n.RemoteASN,
+				EBGPMultiHop: n.EBGPMultiHop,
 			})
 		}
 		groups = append(groups, group)
@@ -143,6 +144,12 @@ func ensureSingleFRRConfiguration(
 					"mode": "all",
 				},
 			},
+		}
+		// Only set when asked for. frr-k8s defaults it to false, so writing it
+		// unconditionally would rewrite every FRRConfiguration on the clouds
+		// that do not need it, for no change in behaviour.
+		if n.EBGPMultiHop {
+			neighbor["ebgpMultiHop"] = true
 		}
 		if config.Spec.BGP.LivenessDetection == networkingv1alpha1.LivenessDetectionBFD {
 			neighbor["bfdProfile"] = "default"

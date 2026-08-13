@@ -62,11 +62,12 @@ func TestLiveMachines_ProviderIDsParse(t *testing.T) {
 		t.Skip("no machines on this cluster")
 	}
 
+	step(t, "parsing the provider ID of all %d Machines in openshift-machine-api", len(items))
 	for i := range items {
 		m := &items[i]
 		providerID, found, err := unstructured.NestedString(m.Object, "spec", "providerID")
 		if err != nil || !found || providerID == "" {
-			t.Logf("%s: no providerID yet, skipping", m.GetName())
+			observed(t, "%s has no providerID yet, skipping", m.GetName())
 			continue
 		}
 		inst, err := ParseProviderID(providerID)
@@ -77,8 +78,9 @@ func TestLiveMachines_ProviderIDsParse(t *testing.T) {
 		if inst.Name != m.GetName() {
 			t.Errorf("%s: parsed instance name %q does not match the Machine name", m.GetName(), inst.Name)
 		}
-		t.Logf("%s -> project=%s zone=%s selfLink=%s", providerID, inst.Project, inst.Zone, inst.SelfLink)
+		observed(t, "%s -> zone=%s instance=%s", providerID, inst.Zone, inst.Name)
 	}
+	step(t, "every provider ID parsed and named its own Machine")
 }
 
 // TestLiveMachines_HookRoundTrip proves the merge patch adds and removes only
@@ -105,7 +107,7 @@ func TestLiveMachines_HookRoundTrip(t *testing.T) {
 		t.Skip("no live machine with a providerID")
 	}
 	name := target.GetName()
-	t.Logf("using machine %s", name)
+	step(t, "using Machine %s", name)
 
 	cfg := testConfig()
 	cfg.MachineNamespace = "openshift-machine-api"
@@ -116,40 +118,49 @@ func TestLiveMachines_HookRoundTrip(t *testing.T) {
 	// Always take the hook off again, however this test exits: leaving one
 	// behind would block deletion of a real machine.
 	defer func() {
+		step(t, "releasing the hook, however this test exited")
 		if err := p.ReleaseTerminating(context.Background(), []platform.RouterNode{node}); err != nil {
 			t.Errorf("cleanup: %v", err)
 		}
 		if hasHookLive(t, c, name) {
 			t.Errorf("cleanup left our hook on %s", name)
 		}
+		observed(t, "hooks now %v", hookNamesLive(t, c, name))
 	}()
 
 	before := hookNamesLive(t, c, name)
-	t.Logf("hooks before: %v", before)
+	observed(t, "hooks before %v", before)
 
+	step(t, "holding: HoldTerminating should add %s", LifecycleHookName)
 	if _, err := p.HoldTerminating(ctx, []platform.RouterNode{node}); err != nil {
 		t.Fatalf("HoldTerminating: %v", err)
 	}
 
 	after := hookNamesLive(t, c, name)
-	t.Logf("hooks after: %v", after)
+	observed(t, "hooks after  %v", after)
+
+	step(t, "checking our hook is present")
 	if !containsLive(after, LifecycleHookName) {
 		t.Fatalf("expected our hook on %s, got %v", name, after)
 	}
+
+	step(t, "checking another owner's hooks on the same Machine survived")
 	for _, h := range before {
 		if !containsLive(after, h) {
 			t.Errorf("hook %q owned by someone else was lost", h)
 		}
 	}
 
-	// A second pass must not write again.
+	step(t, "checking a second pass writes nothing, so a resync does not churn the Machine")
 	rv := resourceVersionLive(t, c, name)
 	if _, err := p.HoldTerminating(ctx, []platform.RouterNode{node}); err != nil {
 		t.Fatalf("second HoldTerminating: %v", err)
 	}
-	if got := resourceVersionLive(t, c, name); got != rv {
+	got := resourceVersionLive(t, c, name)
+	if got != rv {
 		t.Errorf("expected no write on an unchanged machine, resourceVersion moved %s -> %s", rv, got)
 	}
+	observed(t, "resourceVersion unchanged at %s", got)
 }
 
 func getMachineLive(t *testing.T, c client.Client, name string) *unstructured.Unstructured {

@@ -17,10 +17,10 @@ func (p *Platform) reconcileRouteServerPeers(ctx context.Context, nodes []platfo
 
 	nodesByAZ := make(map[string]map[string]bool)
 	for _, n := range nodes {
-		if nodesByAZ[n.AZ] == nil {
-			nodesByAZ[n.AZ] = make(map[string]bool)
+		if nodesByAZ[n.Zone] == nil {
+			nodesByAZ[n.Zone] = make(map[string]bool)
 		}
-		nodesByAZ[n.AZ][n.PrivateIP] = true
+		nodesByAZ[n.Zone][n.PrivateIP] = true
 	}
 
 	for az, endpointIDs := range p.endpointsByAZ {

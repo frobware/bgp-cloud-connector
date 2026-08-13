@@ -40,7 +40,7 @@ import (
 
 const (
 	frrNamespace           = "openshift-frr-k8s"
-	frrConfigNamePrefix    = "cudn-bgp-az-"
+	frrConfigNamePrefix    = "cudn-bgp-"
 	routeAdvertisementName = "cudn-bgp-route-advertisements"
 	labelManagedBy         = "app.kubernetes.io/managed-by"
 	labelManagedByVal      = "cudn-bgp-routing-operator"

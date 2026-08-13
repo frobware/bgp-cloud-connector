@@ -206,9 +206,9 @@ func TestReconcilePeers_MultiAZCreate(t *testing.T) {
 	p := newTestPlatform(mock)
 
 	nodes := []platform.RouterNode{
-		{Name: "node-a", PrivateIP: "10.0.1.10", AZ: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
-		{Name: "node-b", PrivateIP: "10.0.2.10", AZ: "us-east-1b", ProviderID: "aws:///us-east-1b/i-b"},
-		{Name: "node-c", PrivateIP: "10.0.3.10", AZ: "us-east-1c", ProviderID: "aws:///us-east-1c/i-c"},
+		{Name: "node-a", PrivateIP: "10.0.1.10", Zone: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
+		{Name: "node-b", PrivateIP: "10.0.2.10", Zone: "us-east-1b", ProviderID: "aws:///us-east-1b/i-b"},
+		{Name: "node-c", PrivateIP: "10.0.3.10", Zone: "us-east-1c", ProviderID: "aws:///us-east-1c/i-c"},
 	}
 
 	if err := p.reconcileRouteServerPeers(context.Background(), nodes); err != nil {
@@ -258,7 +258,7 @@ func TestReconcilePeers_AdoptPreExistingUntagged(t *testing.T) {
 	}
 
 	nodes := []platform.RouterNode{
-		{Name: "node-a", PrivateIP: "10.0.1.10", AZ: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
+		{Name: "node-a", PrivateIP: "10.0.1.10", Zone: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
 	}
 
 	if err := p.reconcileRouteServerPeers(context.Background(), nodes); err != nil {
@@ -331,7 +331,7 @@ func TestReconcilePeers_BFDLivenessDetection(t *testing.T) {
 	}
 
 	nodes := []platform.RouterNode{
-		{Name: "node-a", PrivateIP: "10.0.1.10", AZ: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
+		{Name: "node-a", PrivateIP: "10.0.1.10", Zone: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
 	}
 
 	if err := p.reconcileRouteServerPeers(context.Background(), nodes); err != nil {
@@ -395,7 +395,7 @@ func TestDisableSourceDestCheck_EnabledToDisabled(t *testing.T) {
 	p := &Platform{ec2Client: mock}
 
 	nodes := []platform.RouterNode{
-		{Name: "node-a", PrivateIP: "10.0.1.10", AZ: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
+		{Name: "node-a", PrivateIP: "10.0.1.10", Zone: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
 	}
 	if err := p.disableSourceDestCheck(context.Background(), nodes); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -431,7 +431,7 @@ func TestDisableSourceDestCheck_AlreadyDisabled(t *testing.T) {
 	p := &Platform{ec2Client: mock}
 
 	nodes := []platform.RouterNode{
-		{Name: "node-a", PrivateIP: "10.0.1.10", AZ: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
+		{Name: "node-a", PrivateIP: "10.0.1.10", Zone: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
 	}
 	if err := p.disableSourceDestCheck(context.Background(), nodes); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -461,7 +461,7 @@ func TestDisableSourceDestCheck_NoPrimaryENI(t *testing.T) {
 	p := &Platform{ec2Client: mock}
 
 	nodes := []platform.RouterNode{
-		{Name: "node-a", PrivateIP: "10.0.1.10", AZ: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
+		{Name: "node-a", PrivateIP: "10.0.1.10", Zone: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
 	}
 	err := p.disableSourceDestCheck(context.Background(), nodes)
 	if err == nil {

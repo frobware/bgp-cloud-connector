@@ -66,7 +66,7 @@ func newReadyCUDNBgpConfig() *networkingv1alpha1.CUDNBgpConfig {
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,
-				AvailabilityZones: []networkingv1alpha1.AvailabilityZone{
+				PeerGroups: []networkingv1alpha1.PeerGroup{
 					{
 						NodeSelector: map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
 						Neighbors:    []networkingv1alpha1.BGPNeighbor{{Address: "10.0.1.47", RemoteASN: 64512}},

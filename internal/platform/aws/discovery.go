@@ -61,7 +61,7 @@ func (p *Platform) DiscoverEndpoints(ctx context.Context) (*platform.DiscoveryRe
 
 			discoveredRS.Endpoints = append(discoveredRS.Endpoints, platform.DiscoveredEndpoint{
 				EndpointID: epID,
-				AZ:         az,
+				Zone:       az,
 				Address:    address,
 			})
 

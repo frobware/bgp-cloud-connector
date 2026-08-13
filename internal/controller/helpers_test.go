@@ -78,7 +78,7 @@ func TestEnsureFRRConfigurations_BFDProfile(t *testing.T) {
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBFD,
-				AvailabilityZones: []networkingv1alpha1.AvailabilityZone{
+				PeerGroups: []networkingv1alpha1.PeerGroup{
 					{
 						NodeSelector: map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
 						Neighbors: []networkingv1alpha1.BGPNeighbor{
@@ -97,7 +97,7 @@ func TestEnsureFRRConfigurations_BFDProfile(t *testing.T) {
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(FRRConfigurationGVK)
-	if err := c.Get(ctx, types.NamespacedName{Name: "cudn-bgp-az-1", Namespace: FRRNamespace}, obj); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: "cudn-bgp-1", Namespace: FRRNamespace}, obj); err != nil {
 		t.Fatalf("FRRConfiguration not created: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestEnsureFRRConfigurations_PrunesStale(t *testing.T) {
 			"apiVersion": "frrk8s.metallb.io/v1beta1",
 			"kind":       "FRRConfiguration",
 			"metadata": map[string]interface{}{
-				"name":      "cudn-bgp-az-3",
+				"name":      "cudn-bgp-3",
 				"namespace": FRRNamespace,
 				"labels":    map[string]interface{}{LabelManagedBy: LabelManagedByVal},
 			},
@@ -140,7 +140,7 @@ func TestEnsureFRRConfigurations_PrunesStale(t *testing.T) {
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,
-				AvailabilityZones: []networkingv1alpha1.AvailabilityZone{
+				PeerGroups: []networkingv1alpha1.PeerGroup{
 					{
 						NodeSelector: map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
 						Neighbors:    []networkingv1alpha1.BGPNeighbor{{Address: "10.0.1.47", RemoteASN: 64512}},
@@ -157,15 +157,15 @@ func TestEnsureFRRConfigurations_PrunesStale(t *testing.T) {
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(FRRConfigurationGVK)
-	if err := c.Get(ctx, types.NamespacedName{Name: "cudn-bgp-az-1", Namespace: FRRNamespace}, obj); err != nil {
-		t.Error("cudn-bgp-az-1 should exist")
+	if err := c.Get(ctx, types.NamespacedName{Name: "cudn-bgp-1", Namespace: FRRNamespace}, obj); err != nil {
+		t.Error("cudn-bgp-1 should exist")
 	}
 
 	staleObj := &unstructured.Unstructured{}
 	staleObj.SetGroupVersionKind(FRRConfigurationGVK)
-	err := c.Get(ctx, types.NamespacedName{Name: "cudn-bgp-az-3", Namespace: FRRNamespace}, staleObj)
+	err := c.Get(ctx, types.NamespacedName{Name: "cudn-bgp-3", Namespace: FRRNamespace}, staleObj)
 	if err == nil {
-		t.Error("cudn-bgp-az-3 should have been pruned")
+		t.Error("cudn-bgp-3 should have been pruned")
 	}
 }
 
@@ -197,7 +197,7 @@ func TestEnsureFRRConfigurations_KeepsUnmanagedResources(t *testing.T) {
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,
-				AvailabilityZones: []networkingv1alpha1.AvailabilityZone{
+				PeerGroups: []networkingv1alpha1.PeerGroup{
 					{
 						NodeSelector: map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
 						Neighbors:    []networkingv1alpha1.BGPNeighbor{{Address: "10.0.1.47", RemoteASN: 64512}},

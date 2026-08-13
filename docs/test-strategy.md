@@ -85,7 +85,7 @@ test/e2e/
       cudnbgprouting.yaml
 ```
 
-E2E tests read CR manifests from a profile directory under `test/e2e/manifests/<profile>/`. Every `CUDNBgpConfig` must set `spec.platform`, which is the discriminator for the cloud block beside it. Shared E2E tests use `platform: Manual`, where CEL requires `spec.bgp.availabilityZones` and forbids any cloud block; provider-specific tests use `platform: AWS` with `spec.aws`, or `platform: GCP` with `spec.gcp`, where CEL forbids `availabilityZones`.
+E2E tests read CR manifests from a profile directory under `test/e2e/manifests/<profile>/`. Every `CUDNBgpConfig` must set `spec.platform`, which is the discriminator for the cloud block beside it. Shared E2E tests use `platform: Manual`, where CEL requires `spec.bgp.peerGroups` and forbids any cloud block; provider-specific tests use `platform: AWS` with `spec.aws`, or `platform: GCP` with `spec.gcp`, where CEL forbids `peerGroups`.
 
 **Shared E2E tests** validate behavior that only a real cluster with a live BGP peer can exercise — BGP session establishment, route advertisement, FRR config drift recovery, and cleanup. Unit tests cover the reconciliation logic itself; shared E2E tests verify the downstream effect on actual BGP sessions.
 

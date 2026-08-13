@@ -90,7 +90,7 @@ func liveRouterNodes(t *testing.T) ([]platform.RouterNode, client.Client) {
 		rn := platform.RouterNode{
 			Name:       n.Name,
 			ProviderID: n.Spec.ProviderID,
-			AZ:         n.Labels["topology.kubernetes.io/zone"],
+			Zone:       n.Labels["topology.kubernetes.io/zone"],
 		}
 		for _, a := range n.Status.Addresses {
 			if a.Type == corev1.NodeInternalIP {
@@ -112,7 +112,7 @@ func TestGCPLive_ReconcileNodes(t *testing.T) {
 	nodes, k8s := liveRouterNodes(t)
 	t.Logf("router nodes: %d", len(nodes))
 	for _, n := range nodes {
-		t.Logf("  %s %s %s", n.Name, n.AZ, n.PrivateIP)
+		t.Logf("  %s %s %s", n.Name, n.Zone, n.PrivateIP)
 	}
 
 	computeClient, err := NewComputeClient(ctx, cfg.Project, cfg.Region)

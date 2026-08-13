@@ -61,16 +61,17 @@ func IsFRRReady(ctx context.Context, c client.Client) (bool, error) {
 	return true, nil
 }
 
-// peerGroupsFromSpec renders the statically configured availability zones as
-// peer groups, preserving the order they appear in the CR.
+// peerGroupsFromSpec renders the peer groups declared in the CR, preserving
+// the order they appear in. Only platform: Manual takes this path; every other
+// platform discovers its groups from the cloud.
 func peerGroupsFromSpec(config *networkingv1alpha1.CUDNBgpConfig) []platform.PeerGroup {
-	groups := make([]platform.PeerGroup, 0, len(config.Spec.BGP.AvailabilityZones))
-	for i, az := range config.Spec.BGP.AvailabilityZones {
+	groups := make([]platform.PeerGroup, 0, len(config.Spec.BGP.PeerGroups))
+	for i, pg := range config.Spec.BGP.PeerGroups {
 		group := platform.PeerGroup{
 			Key:          fmt.Sprintf("%d", i+1),
-			NodeSelector: az.NodeSelector,
+			NodeSelector: pg.NodeSelector,
 		}
-		for _, n := range az.Neighbors {
+		for _, n := range pg.Neighbors {
 			group.Neighbors = append(group.Neighbors, platform.DiscoveredNeighbor{
 				Address:      n.Address,
 				ASN:          n.RemoteASN,

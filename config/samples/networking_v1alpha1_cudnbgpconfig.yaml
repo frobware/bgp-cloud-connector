@@ -4,7 +4,7 @@ metadata:
   name: cluster
 spec:
   # Which cloud the operator reconciles against. AWS requires spec.aws;
-  # Manual requires spec.bgp.availabilityZones and calls no cloud API.
+  # Manual requires spec.bgp.peerGroups and calls no cloud API.
   platform: AWS
 
   bgp:
@@ -16,7 +16,7 @@ spec:
 
   # --- AWS auto-discovery mode (platform: AWS) ---
   # The operator discovers Route Server endpoints, neighbor IPs, and remote
-  # ASN automatically. Do NOT set spec.bgp.availabilityZones in this mode.
+  # ASN automatically. Do NOT set spec.bgp.peerGroups in this mode.
   aws:
     region: us-east-1                # terraform output aws_region
     routeServerIDs:                  # terraform output vpc1_route_server_ids
@@ -27,7 +27,7 @@ spec:
   # platform: Manual
   # bgp:
   #   localASN: 65001
-  #   availabilityZones:
+  #   peerGroups:
   #     - nodeSelector:
   #         topology.kubernetes.io/zone: us-east-1a
   #       neighbors:

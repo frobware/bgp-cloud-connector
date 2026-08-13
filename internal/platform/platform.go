@@ -69,20 +69,6 @@ type CloudPlatform interface {
 	CheckPrerequisites(ctx context.Context) ([]string, error)
 }
 
-// NodeLifecycle is implemented by platforms that must withdraw cloud state
-// before a router node's Machine is allowed to terminate. Platforms whose
-// cloud tolerates a peer outliving its instance do not implement it, and the
-// controller then skips the hold and release entirely.
-type NodeLifecycle interface {
-	// HoldTerminating reports which of nodes are terminating and have been
-	// held. Held nodes are excluded from cloud reconciliation so that their
-	// peers are torn down, and must later be passed to ReleaseTerminating.
-	HoldTerminating(ctx context.Context, nodes []RouterNode) ([]RouterNode, error)
-	// ReleaseTerminating releases the hold placed by HoldTerminating,
-	// unblocking Machine deletion.
-	ReleaseTerminating(ctx context.Context, held []RouterNode) error
-}
-
 // CredentialError reports that a platform could not authenticate against its
 // cloud. The controller surfaces it as a distinct condition reason so that a
 // missing or expired credential is not reported as a discovery failure.

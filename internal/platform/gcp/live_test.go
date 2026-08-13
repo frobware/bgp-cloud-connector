@@ -103,7 +103,7 @@ func TestGCPLive_DiscoverEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building compute client: %v", err)
 	}
-	p := NewWithClients(cfg, c, nil, nil)
+	p := NewWithClients(cfg, c, nil)
 
 	step(t, "discovering the peering plan the controller would render")
 	result, err := p.DiscoverEndpoints(ctx)
@@ -160,7 +160,7 @@ func TestGCPLive_NATRouterIsRejected(t *testing.T) {
 		t.Fatalf("building compute client: %v", err)
 	}
 	cfg.CloudRouterName = natRouter
-	p := NewWithClients(cfg, c, nil, nil)
+	p := NewWithClients(cfg, c, nil)
 
 	step(t, "pointing discovery at the Cloud NAT router %q, which carries the cluster's egress", natRouter)
 	_, err = p.DiscoverEndpoints(ctx)

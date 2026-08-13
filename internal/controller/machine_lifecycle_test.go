@@ -1,4 +1,4 @@
-package gcp
+package controller
 
 import (
 	"context"
@@ -18,6 +18,19 @@ func machineScheme() *runtime.Scheme {
 	s.AddKnownTypeWithName(machineGVK, &unstructured.Unstructured{})
 	s.AddKnownTypeWithName(machineListGVK, &unstructured.UnstructuredList{})
 	return s
+}
+
+// machineRouterNode builds a router node whose provider ID is a GCE one. The
+// scheme is arbitrary: this handling keys on spec.providerID as an opaque
+// string and never parses it, which is the property that let it move out of a
+// cloud package. TestHoldTerminating_ProviderIDSchemeIsOpaque pins that.
+func machineRouterNode(name, ip, zone string) platform.RouterNode {
+	return platform.RouterNode{
+		Name:       name,
+		PrivateIP:  ip,
+		Zone:       zone,
+		ProviderID: "gce://proj/" + zone + "/" + name,
+	}
 }
 
 // newMachine builds a Machine, optionally already carrying our hook and
@@ -49,12 +62,11 @@ func newMachine(name, providerID string, withHook, deleting bool) *unstructured.
 	return m
 }
 
-func machinePlatform(t *testing.T, objs ...client.Object) (*Platform, client.Client) {
+// machineClient is a fake client carrying the given Machines. There is no
+// platform involved any more: this handling is Machine API, not cloud.
+func machineClient(t *testing.T, objs ...client.Object) client.Client {
 	t.Helper()
-	c := fake.NewClientBuilder().WithScheme(machineScheme()).WithObjects(objs...).Build()
-	cfg := testConfig()
-	cfg.MachineNamespace = "openshift-machine-api"
-	return NewWithClients(cfg, &fakeCompute{}, &fakeNCC{}, c), c
+	return fake.NewClientBuilder().WithScheme(machineScheme()).WithObjects(objs...).Build()
 }
 
 func hookNames(t *testing.T, c client.Client, name string) []string {
@@ -87,9 +99,9 @@ func contains(list []string, want string) bool {
 // router node gets the hook so a later deletion is gated.
 func TestHoldTerminating_AddsHookToRouterMachine(t *testing.T) {
 	m := newMachine("worker-a", "gce://proj/europe-west1-a/worker-a", false, false)
-	p, c := machinePlatform(t, m)
+	c := machineClient(t, m)
 
-	held, err := p.HoldTerminating(context.Background(), []platform.RouterNode{node("worker-a", "10.0.0.2", "europe-west1-a")})
+	held, err := HoldTerminatingRouterNodes(context.Background(), c, []platform.RouterNode{machineRouterNode("worker-a", "10.0.0.2", "europe-west1-a")})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,11 +123,11 @@ func TestHoldTerminating_AddsHookToRouterMachine(t *testing.T) {
 func TestHoldTerminating_ReportsDeletingMachine(t *testing.T) {
 	live := newMachine("worker-a", "gce://proj/europe-west1-a/worker-a", true, false)
 	dying := newMachine("worker-b", "gce://proj/europe-west1-b/worker-b", true, true)
-	p, _ := machinePlatform(t, live, dying)
+	c := machineClient(t, live, dying)
 
-	held, err := p.HoldTerminating(context.Background(), []platform.RouterNode{
-		node("worker-a", "10.0.0.2", "europe-west1-a"),
-		node("worker-b", "10.0.0.3", "europe-west1-b"),
+	held, err := HoldTerminatingRouterNodes(context.Background(), c, []platform.RouterNode{
+		machineRouterNode("worker-a", "10.0.0.2", "europe-west1-a"),
+		machineRouterNode("worker-b", "10.0.0.3", "europe-west1-b"),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -129,9 +141,9 @@ func TestHoldTerminating_ReportsDeletingMachine(t *testing.T) {
 // router set from being blocked from deletion forever.
 func TestHoldTerminating_RemovesHookFromNonRouter(t *testing.T) {
 	m := newMachine("worker-z", "gce://proj/europe-west1-c/worker-z", true, false)
-	p, c := machinePlatform(t, m)
+	c := machineClient(t, m)
 
-	if _, err := p.HoldTerminating(context.Background(), []platform.RouterNode{node("worker-a", "10.0.0.2", "europe-west1-a")}); err != nil {
+	if _, err := HoldTerminatingRouterNodes(context.Background(), c, []platform.RouterNode{machineRouterNode("worker-a", "10.0.0.2", "europe-west1-a")}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -146,9 +158,9 @@ func TestHoldTerminating_RemovesHookFromNonRouter(t *testing.T) {
 
 func TestReleaseTerminating_RemovesHook(t *testing.T) {
 	m := newMachine("worker-b", "gce://proj/europe-west1-b/worker-b", true, true)
-	p, c := machinePlatform(t, m)
+	c := machineClient(t, m)
 
-	if err := p.ReleaseTerminating(context.Background(), []platform.RouterNode{node("worker-b", "10.0.0.3", "europe-west1-b")}); err != nil {
+	if err := ReleaseTerminatingRouterNodes(context.Background(), c, []platform.RouterNode{machineRouterNode("worker-b", "10.0.0.3", "europe-west1-b")}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -164,9 +176,9 @@ func TestReleaseTerminating_RemovesHook(t *testing.T) {
 // TestReleaseTerminating_MissingMachine covers a Machine that finished
 // deleting between the hold and the release.
 func TestReleaseTerminating_MissingMachine(t *testing.T) {
-	p, _ := machinePlatform(t)
+	c := machineClient(t)
 
-	if err := p.ReleaseTerminating(context.Background(), []platform.RouterNode{node("gone", "10.0.0.9", "europe-west1-a")}); err != nil {
+	if err := ReleaseTerminatingRouterNodes(context.Background(), c, []platform.RouterNode{machineRouterNode("gone", "10.0.0.9", "europe-west1-a")}); err != nil {
 		t.Fatalf("a machine that has already gone is not an error: %v", err)
 	}
 }
@@ -175,10 +187,10 @@ func TestReleaseTerminating_MissingMachine(t *testing.T) {
 // machine issues no further change.
 func TestHoldTerminating_IsIdempotent(t *testing.T) {
 	m := newMachine("worker-a", "gce://proj/europe-west1-a/worker-a", true, false)
-	p, c := machinePlatform(t, m)
+	c := machineClient(t, m)
 
-	nodes := []platform.RouterNode{node("worker-a", "10.0.0.2", "europe-west1-a")}
-	if _, err := p.HoldTerminating(context.Background(), nodes); err != nil {
+	nodes := []platform.RouterNode{machineRouterNode("worker-a", "10.0.0.2", "europe-west1-a")}
+	if _, err := HoldTerminatingRouterNodes(context.Background(), c, nodes); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -189,7 +201,7 @@ func TestHoldTerminating_IsIdempotent(t *testing.T) {
 	}
 	rv := before.GetResourceVersion()
 
-	if _, err := p.HoldTerminating(context.Background(), nodes); err != nil {
+	if _, err := HoldTerminatingRouterNodes(context.Background(), c, nodes); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -200,5 +212,39 @@ func TestHoldTerminating_IsIdempotent(t *testing.T) {
 	}
 	if after.GetResourceVersion() != rv {
 		t.Errorf("expected no write on an unchanged machine, resourceVersion moved %s -> %s", rv, after.GetResourceVersion())
+	}
+}
+
+// TestHoldTerminating_ProviderIDSchemeIsOpaque is why this handling belongs in
+// the controller rather than in a cloud package. The same code must gate an
+// AWS, Azure or GCP Machine, because all it does is match spec.providerID as a
+// string and patch a hook.
+func TestHoldTerminating_ProviderIDSchemeIsOpaque(t *testing.T) {
+	for _, tc := range []struct {
+		cloud      string
+		providerID string
+	}{
+		{"aws", "aws:///us-east-2b/i-0abc123"},
+		{"azure", "azure:///subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/worker"},
+		{"gce", "gce://proj/us-east1-b/worker"},
+	} {
+		t.Run(tc.cloud, func(t *testing.T) {
+			c := machineClient(t, newMachine("worker", tc.providerID, false, false))
+
+			node := platform.RouterNode{Name: "worker", PrivateIP: "10.0.0.2", ProviderID: tc.providerID}
+			if _, err := HoldTerminatingRouterNodes(context.Background(), c, []platform.RouterNode{node}); err != nil {
+				t.Fatalf("HoldTerminatingRouterNodes: %v", err)
+			}
+			if !contains(hookNames(t, c, "worker"), LifecycleHookName) {
+				t.Errorf("no hook placed on a %s Machine", tc.cloud)
+			}
+
+			if err := ReleaseTerminatingRouterNodes(context.Background(), c, []platform.RouterNode{node}); err != nil {
+				t.Fatalf("ReleaseTerminatingRouterNodes: %v", err)
+			}
+			if contains(hookNames(t, c, "worker"), LifecycleHookName) {
+				t.Errorf("hook left on a %s Machine", tc.cloud)
+			}
+		})
 	}
 }

@@ -281,17 +281,14 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		// Nodes whose Machine is terminating are held and excluded, so that
 		// reconciliation tears their peers down before the instance goes away.
-		// Platforms that do not implement NodeLifecycle hold nothing.
-		lifecycle, hasLifecycle := cloud.(platform.NodeLifecycle)
-		var held []platform.RouterNode
-		if hasLifecycle {
-			held, err = lifecycle.HoldTerminating(ctx, nodes)
-			if err != nil {
-				return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudResourcesReconciled,
-					"CloudReconcileFailed", fmt.Sprintf("failed to hold terminating nodes: %v", err))
-			}
-			nodes = excludeNodes(nodes, held)
+		// This is Machine API handling, not cloud handling, so every platform
+		// gets it.
+		held, err := HoldTerminatingRouterNodes(ctx, r.Client, nodes)
+		if err != nil {
+			return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudResourcesReconciled,
+				"CloudReconcileFailed", fmt.Sprintf("failed to hold terminating nodes: %v", err))
 		}
+		nodes = excludeNodes(nodes, held)
 
 		if err := cloud.ReconcileNodes(ctx, nodes); err != nil {
 			return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudResourcesReconciled,
@@ -299,7 +296,7 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 
 		if len(held) > 0 {
-			if err := lifecycle.ReleaseTerminating(ctx, held); err != nil {
+			if err := ReleaseTerminatingRouterNodes(ctx, r.Client, held); err != nil {
 				return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudResourcesReconciled,
 					"CloudReconcileFailed", fmt.Sprintf("failed to release terminating nodes: %v", err))
 			}
@@ -435,17 +432,16 @@ func buildGCPPlatform(ctx context.Context, c client.Client, config *networkingv1
 	}
 
 	return gcpplatform.New(ctx, gcpplatform.Config{
-		Project:          gcpSpec.Project,
-		Region:           gcpSpec.Region,
-		CloudRouterName:  gcpSpec.CloudRouterName,
-		NCCHubName:       gcpSpec.NCC.HubName,
-		NCCSpokePrefix:   gcpSpec.NCC.SpokePrefix,
-		SiteToSite:       gcpSpec.NCC.SiteToSiteDataTransfer,
-		NestedVirt:       gcpSpec.IsNestedVirtEnabled(),
-		MachineNamespace: gcpSpec.MachineNamespace,
-		LocalASN:         config.Spec.BGP.LocalASN,
-		ClusterID:        clusterID,
-	}, c)
+		Project:         gcpSpec.Project,
+		Region:          gcpSpec.Region,
+		CloudRouterName: gcpSpec.CloudRouterName,
+		NCCHubName:      gcpSpec.NCC.HubName,
+		NCCSpokePrefix:  gcpSpec.NCC.SpokePrefix,
+		SiteToSite:      gcpSpec.NCC.SiteToSiteDataTransfer,
+		NestedVirt:      gcpSpec.IsNestedVirtEnabled(),
+		LocalASN:        config.Spec.BGP.LocalASN,
+		ClusterID:       clusterID,
+	})
 }
 
 func getInfrastructureName(ctx context.Context, c client.Client) (string, error) {

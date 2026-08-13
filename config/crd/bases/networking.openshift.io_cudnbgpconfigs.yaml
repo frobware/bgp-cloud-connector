@@ -90,6 +90,29 @@ spec:
                 - region
                 - routeServerIDs
                 type: object
+              azure:
+                description: |-
+                  AzureConfig identifies the Azure Route Server the router nodes peer with.
+                  Azure models a Route Server as a Virtual Hub, and its own addresses and ASN
+                  are read from it rather than configured here.
+                properties:
+                  resourceGroup:
+                    minLength: 1
+                    type: string
+                  routeServerName:
+                    description: |-
+                      RouteServerName is the Azure Route Server whose BGP connections this
+                      operator manages. Its VirtualRouterIPs become the BGP neighbours.
+                    minLength: 1
+                    type: string
+                  subscriptionID:
+                    minLength: 1
+                    type: string
+                required:
+                - resourceGroup
+                - routeServerName
+                - subscriptionID
+                type: object
               bgp:
                 properties:
                   availabilityZones:
@@ -201,6 +224,7 @@ spec:
                   cloud-specific block below must be populated.
                 enum:
                 - AWS
+                - Azure
                 - GCP
                 - Manual
                 type: string
@@ -221,6 +245,9 @@ spec:
             - message: spec.aws must be set when spec.platform is AWS, and must be
                 absent otherwise
               rule: (self.platform == 'AWS') == has(self.aws)
+            - message: spec.azure must be set when spec.platform is Azure, and must
+                be absent otherwise
+              rule: (self.platform == 'Azure') == has(self.azure)
             - message: spec.gcp must be set when spec.platform is GCP, and must be
                 absent otherwise
               rule: (self.platform == 'GCP') == has(self.gcp)

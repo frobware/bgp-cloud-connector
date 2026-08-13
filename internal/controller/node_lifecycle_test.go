@@ -18,16 +18,20 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	networkingv1alpha1 "github.com/openshift/bgp-cloud-connector/api/v1alpha1"
@@ -174,42 +178,61 @@ func TestLifecycle_NothingTerminatingKeepsHooks(t *testing.T) {
 // implement the optional interface". Off OpenShift, or on a HyperShift guest
 // cluster whose Machines live in the management cluster, there is nothing to
 // gate deletion on and reconciliation must carry on regardless.
+//
+// The error is injected rather than produced by leaving Machine out of the
+// scheme. The fake client returns an empty list and a nil error for a kind it
+// does not know, so a test written that way passes whether or not the guard
+// exists -- which is what the first version of this test did.
 func TestLifecycle_NoMachineAPIIsANoOp(t *testing.T) {
 	mock := &mockPlatform{}
+	r := lifecycleReconciler(t, mock, true)
 
-	s := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(s)
-	_ = networkingv1alpha1.AddToScheme(s)
-	s.AddKnownTypeWithName(NetworkGVK, &unstructured.Unstructured{})
-	s.AddKnownTypeWithName(NetworkGVK.GroupVersion().WithKind("NetworkList"), &unstructured.UnstructuredList{})
-	s.AddKnownTypeWithName(FRRConfigurationGVK.GroupVersion().WithKind("FRRConfiguration"), &unstructured.Unstructured{})
-	s.AddKnownTypeWithName(FRRConfigurationGVK.GroupVersion().WithKind("FRRConfigurationList"), &unstructured.UnstructuredList{})
-	// Machine is deliberately not registered.
-
-	config := newTestCUDNBgpConfigWithAWS()
-	config.Finalizers = []string{ConfigFinalizerName}
-	c := fake.NewClientBuilder().WithScheme(s).WithObjects(
-		config,
-		&unstructured.Unstructured{Object: map[string]interface{}{
-			"apiVersion": "operator.openshift.io/v1", "kind": "Network",
-			"metadata": map[string]interface{}{"name": "cluster"}, "spec": map[string]interface{}{},
-		}},
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: FRRNamespace}},
-		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "frr-k8s-pod", Namespace: FRRNamespace,
-				Labels: map[string]string{"app": "frr-k8s"},
-			},
-			Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	noMachineAPI := &meta.NoKindMatchError{
+		GroupKind: schema.GroupKind{Group: "machine.openshift.io", Kind: "Machine"},
+	}
+	base, ok := r.Client.(client.WithWatch)
+	if !ok {
+		t.Fatal("expected the fake client to support Watch, which the interceptor needs")
+	}
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if list.GetObjectKind().GroupVersionKind() == machineListGVK {
+				return noMachineAPI
+			}
+			return c.List(ctx, list, opts...)
 		},
-		lifecycleNode("worker-a", "10.0.0.1"),
-	).WithStatusSubresource(config).Build()
+	})
 
-	r := &CUDNBgpConfigReconciler{Client: c, Scheme: s, PlatformBuilder: mockPlatformBuilder(mock)}
 	if err := reconcileOnce(t, r); err != nil {
 		t.Fatalf("reconcile should survive a cluster with no Machine API: %v", err)
 	}
 	if !mock.reconcileNodesCalled {
 		t.Error("the cloud should still be reconciled with no Machine API present")
+	}
+}
+
+// TestIsMachineAPIAbsent pins which errors mean the Machine API is not there,
+// since the guard above turns on this classification and nothing else.
+func TestIsMachineAPIAbsent(t *testing.T) {
+	absent := []error{
+		&meta.NoKindMatchError{GroupKind: schema.GroupKind{Group: "machine.openshift.io", Kind: "Machine"}},
+		errors.New("no kind is registered for the type v1beta1.MachineList"),
+		errors.New("the server could not find the requested resource"),
+	}
+	for _, err := range absent {
+		if !isMachineAPIAbsent(err) {
+			t.Errorf("should be treated as absent: %v", err)
+		}
+	}
+
+	present := []error{
+		nil,
+		errors.New("connection refused"),
+		errors.New("machines.machine.openshift.io is forbidden"),
+	}
+	for _, err := range present {
+		if isMachineAPIAbsent(err) {
+			t.Errorf("should not be treated as absent, or a real failure becomes a silent no-op: %v", err)
+		}
 	}
 }

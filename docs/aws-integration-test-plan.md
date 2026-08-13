@@ -24,7 +24,7 @@ Automated test plan for the CUDN BGP Routing Operator's AWS platform integration
 
 The default credential chain (IRSA) is bypassed in unit tests via mock injection. Discovery API calls (`DescribeRouteServers`, `DescribeRouteServerEndpoints`, `DescribeSubnets`) are mocked alongside the existing peer and instance mocks.
 
-**E2E tests** read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). AWS E2E tests require `platform: AWS` with `spec.aws`; CEL rejects one without the other, and rejects `spec.bgp.peerGroups` alongside either. The `rosa-bgp-poc` profile is provided as an example; a custom profile matching the actual ROSA deployment is needed for real testing. The test framework derives expected state from the operator's discovered `status.aws.routeServers` and cluster nodes -- no topology is hardcoded in the test code.
+**E2E tests** read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). AWS E2E tests require `platform: AWS` with `spec.aws`; CEL rejects one without the other, and rejects `spec.bgp.peerGroups` alongside either. The `rosa-bgp-poc` profile is provided as an example; a custom profile matching the actual ROSA deployment is needed for real testing. The test framework derives expected state from the operator's discovered `status.peerGroups` and cluster nodes -- no topology is hardcoded in the test code.
 
 | Component | How discovered |
 |:---|:---|
@@ -105,7 +105,7 @@ Full end-to-end tests running the operator on a ROSA HCP cluster with VPC Route 
 
 | ID | Test Case | Action | Verification |
 |:---|:---|:---|:---|
-| E2E-AWS-01 | Full stack reconcile | Deploy operator, create labelled namespace, apply CUDNBgpConfig and CUDNBgpRouting CRs | Operator Running; config phase=Ready with `PrerequisitesSatisfied`, `CloudEndpointsDiscovered` and `CloudResourcesReconciled` all True; `status.aws.routeServers` populated with discovered endpoints, IPs, AZs, and remote ASN; one FRRConfiguration per discovered AZ, each selecting on `topology.kubernetes.io/zone` with the discovered neighbour addresses; Route Server peers exist per AZ; SourceDestCheck=false on router nodes; routing phase=Ready with CUDN + RouteAdvertisements; FRR pods show established BGP sessions |
+| E2E-AWS-01 | Full stack reconcile | Deploy operator, create labelled namespace, apply CUDNBgpConfig and CUDNBgpRouting CRs | Operator Running; config phase=Ready with `PrerequisitesSatisfied`, `CloudEndpointsDiscovered` and `CloudResourcesReconciled` all True; `status.peerGroups` populated with one group per discovered zone, each carrying its neighbour addresses and remote ASN; one FRRConfiguration per discovered AZ, each selecting on `topology.kubernetes.io/zone` with the discovered neighbour addresses; Route Server peers exist per AZ; SourceDestCheck=false on router nodes; routing phase=Ready with CUDN + RouteAdvertisements; FRR pods show established BGP sessions |
 
 ### Node Lifecycle
 

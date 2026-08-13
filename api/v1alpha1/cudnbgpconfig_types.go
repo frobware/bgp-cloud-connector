@@ -73,6 +73,11 @@ type BGPNeighbor struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=4294967295
 	RemoteASN int64 `json:"remoteASN"`
+	// EBGPMultiHop allows the session to be established with a peer that is
+	// not on this node's link. Azure Route Server needs it; AWS Route Server
+	// and GCP Cloud Router do not.
+	// +optional
+	EBGPMultiHop bool `json:"ebgpMultiHop,omitempty"`
 }
 
 type AvailabilityZone struct {

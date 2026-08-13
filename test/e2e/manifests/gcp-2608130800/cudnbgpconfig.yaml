@@ -1,0 +1,43 @@
+apiVersion: networking.openshift.io/v1alpha1
+kind: CUDNBgpConfig
+metadata:
+  name: cluster
+spec:
+  platform: GCP
+
+  bgp:
+    localASN: 65001
+    livenessDetection: bgp-keepalive
+
+  routerNodeSelector:
+    networking.openshift.io/cudn-bgp-router: ""
+
+  # The MachineSet template carries no router label, so a node added by
+  # scaling one is silently not a router unless the operator maintains the
+  # labels itself. The node lifecycle tests scale a MachineSet, so this has
+  # to be on for them to mean anything.
+  autoLabelRouterNodes:
+    eligible:
+      node-role.kubernetes.io/worker: ""
+    exclude:
+      node-role.kubernetes.io/infra: ""
+
+  # Names match modules/osd-bgp-routing in rh-mobb/osd-gcp-cudn-routing and
+  # what gcp-create-cloud-router builds, so a cluster built by hand and one
+  # built by the Terraform present the operator with the same estate.
+  #
+  # They embed the infrastructure ID, which changes with every cluster, so
+  # this profile is good for amcdermo-2608130800-2rhp7 and no other. Copy it
+  # per cluster: `oc get infrastructure cluster -o
+  # jsonpath='{.status.infrastructureName}'` gives the prefix.
+  #
+  # cloudRouterName must not be <infra>-network-router. That one anchors
+  # Cloud NAT, has no ASN and no interfaces, and the cluster's egress depends
+  # on it. Discovery rejects a router with no interfaces for that reason.
+  gcp:
+    project: openshift-qe
+    region: us-east1
+    cloudRouterName: amcdermo-2608130800-2rhp7-cudn-cr
+    ncc:
+      hubName: amcdermo-2608130800-2rhp7-ncc-hub
+      spokePrefix: amcdermo-2608130800-2rhp7-bgp-spoke

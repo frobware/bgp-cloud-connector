@@ -5,7 +5,7 @@
 // machines.go can only be proven here.
 //
 //	KUBECONFIG=<cluster>/auth/kubeconfig \
-//	go test -tags gcplive ./internal/platform/gcp/ -run TestLiveMachines -v
+//	go test -tags gcplive ./internal/platform/gcp/ -run TestGCPLive -v
 //
 // This mutates real Machine objects: it adds our preTerminate hook and removes
 // it again. A preTerminate hook blocks Machine deletion while present, so the
@@ -51,10 +51,10 @@ func liveMachines(t *testing.T, c client.Client) []unstructured.Unstructured {
 	return list.Items
 }
 
-// TestLiveMachines_ProviderIDsParse feeds every real provider ID on the
+// TestGCPLive_ProviderIDsParse feeds every real provider ID on the
 // cluster through the parser. A format the parser rejects would take the whole
 // GCP platform down, and the format is not something the fakes can vouch for.
-func TestLiveMachines_ProviderIDsParse(t *testing.T) {
+func TestGCPLive_ProviderIDsParse(t *testing.T) {
 	c := liveK8s(t)
 
 	items := liveMachines(t, c)
@@ -83,9 +83,9 @@ func TestLiveMachines_ProviderIDsParse(t *testing.T) {
 	step(t, "every provider ID parsed and named its own Machine")
 }
 
-// TestLiveMachines_HookRoundTrip proves the merge patch adds and removes only
+// TestGCPLive_MachineHookRoundTrip proves the merge patch adds and removes only
 // our hook against a real apiserver.
-func TestLiveMachines_HookRoundTrip(t *testing.T) {
+func TestGCPLive_MachineHookRoundTrip(t *testing.T) {
 	c := liveK8s(t)
 	ctx := context.Background()
 

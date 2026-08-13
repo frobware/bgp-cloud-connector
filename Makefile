@@ -121,6 +121,28 @@ test: manifests generate fmt vet ## Run platform-independent unit tests.
 test-aws: ## Run AWS platform unit tests (mocked, no credentials needed).
 	go test ./internal/platform/aws/... -v -count=1
 
+.PHONY: test-aws-live
+test-aws-live: ## Run AWS platform tests against real infrastructure. Needs the awslive tag, AWS credentials and a prepared route server estate.
+	@[ -n "$(AWS_LIVE_REGION)" ] && [ -n "$(AWS_LIVE_ROUTE_SERVER_IDS)" ] || { \
+	    echo "Set AWS_LIVE_REGION and AWS_LIVE_ROUTE_SERVER_IDS (comma separated)."; \
+	    echo "Optional: AWS_LIVE_CLUSTER_ID."; \
+	    echo "Build the estate first: aws-create-route-servers"; \
+	    exit 1; }
+	go test -tags awslive ./internal/platform/aws/... -v -count=1
+
+.PHONY: test-gcp
+test-gcp: ## Run GCP platform unit tests (mocked, no credentials needed).
+	go test ./internal/platform/gcp/... -v -count=1
+
+.PHONY: test-gcp-live
+test-gcp-live: ## Run GCP platform tests against real infrastructure. Needs the gcplive tag, gcloud credentials and a prepared Cloud Router.
+	@[ -n "$(GCP_PROJECT)" ] && [ -n "$(GCP_REGION)" ] && [ -n "$(GCP_CLOUD_ROUTER)" ] || { \
+	    echo "Set GCP_PROJECT, GCP_REGION and GCP_CLOUD_ROUTER."; \
+	    echo "Optional: GCP_NAT_ROUTER, GCP_NCC_HUB, KUBECONFIG."; \
+	    echo "Build the estate first: gcp-create-cloud-router --prerequisites-only"; \
+	    exit 1; }
+	go test -tags gcplive ./internal/platform/gcp/... -v -count=1
+
 .PHONY: test-e2e
 test-e2e: ## Run shared e2e tests (requires cluster + external BGP peer). Usage: make test-e2e <profile>
 	$(eval E2E_PROFILE := $(filter-out $@,$(MAKECMDGOALS)))
@@ -132,6 +154,12 @@ test-e2e-aws: ## Run AWS e2e tests (requires cluster + IRSA configured). Usage: 
 	$(eval E2E_PROFILE := $(filter-out $@,$(MAKECMDGOALS)))
 	@[ -n "$(E2E_PROFILE)" ] || { echo "Usage: make test-e2e-aws <profile-name>"; exit 1; }
 	E2E_PROFILE=$(E2E_PROFILE) go test ./test/e2e/aws/ -v -timeout 30m -count=1
+
+.PHONY: test-e2e-gcp
+test-e2e-gcp: ## Run GCP e2e tests (requires cluster + Workload Identity + gcloud credentials). Usage: make test-e2e-gcp <profile>
+	$(eval E2E_PROFILE := $(filter-out $@,$(MAKECMDGOALS)))
+	@[ -n "$(E2E_PROFILE)" ] || { echo "Usage: make test-e2e-gcp <profile-name>"; exit 1; }
+	E2E_PROFILE=$(E2E_PROFILE) go test ./test/e2e/gcp/ -v -timeout 45m -count=1
 
 .PHONY: lint
 lint: ## Run golangci-lint linter

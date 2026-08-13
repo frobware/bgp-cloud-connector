@@ -24,7 +24,7 @@ Automated test plan for the CUDN BGP Routing Operator's AWS platform integration
 
 The default credential chain (IRSA) is bypassed in unit tests via mock injection. Discovery API calls (`DescribeRouteServers`, `DescribeRouteServerEndpoints`, `DescribeSubnets`) are mocked alongside the existing peer and instance mocks.
 
-**E2E tests** read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). AWS E2E tests require `spec.aws` to be set. The `rosa-bgp-poc` profile is provided as an example; a custom profile matching the actual ROSA deployment is needed for real testing. The test framework derives expected state from the operator's discovered `status.aws.routeServers` and cluster nodes — no topology is hardcoded in the test code.
+**E2E tests** read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). AWS E2E tests require `platform: AWS` with `spec.aws`; CEL rejects one without the other, and rejects `spec.bgp.availabilityZones` alongside either. The `rosa-bgp-poc` profile is provided as an example; a custom profile matching the actual ROSA deployment is needed for real testing. The test framework derives expected state from the operator's discovered `status.aws.routeServers` and cluster nodes -- no topology is hardcoded in the test code.
 
 | Component | How discovered |
 |:---|:---|
@@ -62,6 +62,7 @@ Test the AWS platform package in isolation using a mocked EC2 client interface. 
 | UT-AWS-06 | Discover endpoints for multiple Route Servers | 2 RS IDs, each with endpoints across 3 subnets | All endpoints from both RSs merged into per-AZ map |
 | UT-AWS-07 | Route Server not found | Invalid RS ID, DescribeRouteServers returns empty | Error returned with invalid Route Server ID |
 | UT-AWS-08 | API failure | DescribeRouteServers returns error | Error propagated |
+| UT-AWS-08b | Peer groups emitted | Endpoints across 3 AZs | One `PeerGroup` per AZ, in stable order, each selecting on `topology.kubernetes.io/zone`, no `RawFRRConfig` (`TestDiscoverEndpoints_PeerGroups`) |
 
 ### Route Server Peer Reconciliation
 
@@ -81,6 +82,17 @@ Test the AWS platform package in isolation using a mocked EC2 client interface. 
 | UT-AWS-15 | No-op when already disabled | SourceDestCheck=false on primary ENI | No modify call |
 | UT-AWS-16 | No primary ENI found (defensive test only) | Instance with no device index 0 | Error returned |
 
+### Prerequisites
+
+`CheckPrerequisites` reports AWS configuration the operator relies on and does not create. Route server propagation is the one that matters and the one that hides: without it every peer reaches available, every BGP session establishes, FRR advertises the CUDN prefix, and the routes stay in the route server and never reach a VPC route table, so nothing in the VPC can reach a pod while every signal the operator produces looks healthy.
+
+| ID | Test Case | Setup | Expected Result | Test |
+|:---|:---|:---|:---|:---|
+| UT-AWS-17 | Propagation in place | GetRouteServerPropagations returns an available propagation | No unmet prerequisite reported | `TestCheckPrerequisites_Satisfied` |
+| UT-AWS-18 | No propagation | GetRouteServerPropagations returns none | One unmet line naming the route server and the `aws ec2 enable-route-server-propagation` remedy | `TestCheckPrerequisites_NoPropagation` |
+| UT-AWS-19 | Pending counts as live | Propagation in `pending` | No unmet prerequisite; a propagation being set up is not a missing one | `TestCheckPrerequisites_PendingCounts` |
+| UT-AWS-20 | API failure | GetRouteServerPropagations returns error | Error propagated, distinct from an unmet prerequisite | **not covered** |
+
 ---
 
 ## E2E Tests (ROSA HCP Cluster)
@@ -93,7 +105,7 @@ Full end-to-end tests running the operator on a ROSA HCP cluster with VPC Route 
 
 | ID | Test Case | Action | Verification |
 |:---|:---|:---|:---|
-| E2E-AWS-01 | Full stack reconcile | Deploy operator, create labeled namespace, apply CUDNBgpConfig and CUDNBgpRouting CRs | Operator Running; config phase=Ready; `status.aws.routeServers` populated with discovered endpoints, IPs, AZs, and remote ASN; FRRConfigurations created per discovered AZ with discovered neighbor addresses; Route Server peers exist per AZ; SourceDestCheck=false on router nodes; routing phase=Ready with CUDN + RouteAdvertisements; FRR pods show established BGP sessions |
+| E2E-AWS-01 | Full stack reconcile | Deploy operator, create labelled namespace, apply CUDNBgpConfig and CUDNBgpRouting CRs | Operator Running; config phase=Ready with `PrerequisitesSatisfied`, `CloudEndpointsDiscovered` and `CloudResourcesReconciled` all True; `status.aws.routeServers` populated with discovered endpoints, IPs, AZs, and remote ASN; one FRRConfiguration per discovered AZ, each selecting on `topology.kubernetes.io/zone` with the discovered neighbour addresses; Route Server peers exist per AZ; SourceDestCheck=false on router nodes; routing phase=Ready with CUDN + RouteAdvertisements; FRR pods show established BGP sessions |
 
 ### Node Lifecycle
 
@@ -101,12 +113,16 @@ Full end-to-end tests running the operator on a ROSA HCP cluster with VPC Route 
 |:---|:---|:---|:---|
 | E2E-AWS-02 | Node-to-peer consistency | Record current router nodes and managed peers | Every router node IP has a corresponding Route Server peer; SourceDestCheck=false on all router nodes |
 
+E2E-AWS-02 does not test node lifecycle, despite the heading it sits under. Its `BeforeAll` captures `initialNodes` and `initialPeerCount`, the body prints them, and nothing compares against them. It adds no node and removes none, so it would pass on a cluster where lifecycle handling was completely broken. It is a steady-state consistency check, which is what the row above now describes. Rewriting it is the first priority in [docs/e2e-plan.md](e2e-plan.md); do not extend it in place.
+
 ### Self-Healing and Drift Recovery
 
 | ID | Test Case | Action | Verification |
 |:---|:---|:---|:---|
-| E2E-AWS-03 | Route Server peer manually deleted | Delete a managed peer via AWS CLI | Operator recreates it within 5 minutes |
-| E2E-AWS-04 | SourceDestCheck manually re-enabled | Enable SourceDestCheck on a router node ENI | Operator disables it within 5 minutes |
+| E2E-AWS-03 | Route Server peer manually deleted | Delete a managed peer via AWS CLI | Operator recreates it within one resync interval |
+| E2E-AWS-04 | SourceDestCheck manually re-enabled | Enable SourceDestCheck on a router node ENI | Operator disables it within one resync interval |
+
+The resync interval is `--resync-interval`, defaulting to five minutes. Set it low in the harness so these converge in seconds; the tests should wait on state rather than on a number of reconcile passes.
 
 ### Deletion and Cleanup
 
@@ -142,11 +158,12 @@ Full operator lifecycle on a ROSA HCP cluster with VPC Route Server infrastructu
 # - IRSA IAM role configured for operator ServiceAccount
 # - AWS credentials configured on the test runner
 
-# Profile is mandatory — specifies which CRs to apply (must have spec.aws)
-make test-e2e-aws rosa-bgp-poc 
+# Profile is mandatory -- specifies which CRs to apply
+# (must set platform: AWS together with spec.aws)
+make test-e2e-aws rosa-bgp-poc
 ```
 
-Profiles are directories under `test/e2e/manifests/` containing `cudnbgpconfig.yaml` and `cudnbgprouting.yaml`. To test your own ROSA cluster, create a profile directory with your CRs, configure IRSA for the operator's ServiceAccount, and run `make test-e2e-aws <profile-name>`.
+Profiles are directories under `test/e2e/manifests/` containing `cudnbgpconfig.yaml` and `cudnbgprouting.yaml`. To test your own ROSA cluster, create a profile directory with your CRs, configure IRSA for the operator's ServiceAccount, and run `make test-e2e-aws <profile-name>`. A profile written before `spec.platform` existed will be rejected at admission with `spec.platform: Required value`.
 
 #### AWS credentials for the test runner
 

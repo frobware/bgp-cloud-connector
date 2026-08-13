@@ -73,7 +73,7 @@ const (
 	// Requires spec.gcp.
 	PlatformGCP PlatformType = "GCP"
 	// PlatformManual performs no cloud reconciliation. BGP neighbours are
-	// taken from spec.bgp.availabilityZones.
+	// taken from spec.bgp.peerGroups.
 	PlatformManual PlatformType = "Manual"
 )
 
@@ -89,7 +89,7 @@ type BGPNeighbor struct {
 	EBGPMultiHop bool `json:"ebgpMultiHop,omitempty"`
 }
 
-type AvailabilityZone struct {
+type PeerGroup struct {
 	NodeSelector map[string]string `json:"nodeSelector"`
 	// +kubebuilder:validation:MinItems=1
 	Neighbors []BGPNeighbor `json:"neighbors"`
@@ -161,7 +161,7 @@ type BGPConfig struct {
 	// +kubebuilder:default="bgp-keepalive"
 	LivenessDetection LivenessDetectionType `json:"livenessDetection,omitempty"`
 	// +optional
-	AvailabilityZones []AvailabilityZone `json:"availabilityZones,omitempty"`
+	PeerGroups []PeerGroup `json:"peerGroups,omitempty"`
 }
 
 // AutoLabelRouterNodesSpec makes the operator maintain
@@ -186,8 +186,8 @@ type AutoLabelRouterNodesSpec struct {
 // +kubebuilder:validation:XValidation:rule="(self.platform == 'AWS') == has(self.aws)",message="spec.aws must be set when spec.platform is AWS, and must be absent otherwise"
 // +kubebuilder:validation:XValidation:rule="(self.platform == 'Azure') == has(self.azure)",message="spec.azure must be set when spec.platform is Azure, and must be absent otherwise"
 // +kubebuilder:validation:XValidation:rule="(self.platform == 'GCP') == has(self.gcp)",message="spec.gcp must be set when spec.platform is GCP, and must be absent otherwise"
-// +kubebuilder:validation:XValidation:rule="self.platform != 'Manual' || (has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones) > 0)",message="spec.bgp.availabilityZones is required when spec.platform is Manual"
-// +kubebuilder:validation:XValidation:rule="self.platform == 'Manual' || !has(self.bgp.availabilityZones) || size(self.bgp.availabilityZones) == 0",message="spec.bgp.availabilityZones may only be set when spec.platform is Manual"
+// +kubebuilder:validation:XValidation:rule="self.platform != 'Manual' || (has(self.bgp.peerGroups) && size(self.bgp.peerGroups) > 0)",message="spec.bgp.peerGroups is required when spec.platform is Manual"
+// +kubebuilder:validation:XValidation:rule="self.platform == 'Manual' || !has(self.bgp.peerGroups) || size(self.bgp.peerGroups) == 0",message="spec.bgp.peerGroups may only be set when spec.platform is Manual"
 type CUDNBgpConfigSpec struct {
 	// Platform selects which cloud the operator reconciles against and which
 	// cloud-specific block below must be populated.

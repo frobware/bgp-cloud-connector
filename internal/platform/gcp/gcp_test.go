@@ -101,7 +101,7 @@ func node(name, ip, zone string) platform.RouterNode {
 	return platform.RouterNode{
 		Name:       name,
 		PrivateIP:  ip,
-		AZ:         zone,
+		Zone:       zone,
 		ProviderID: "gce://proj/" + zone + "/" + name,
 	}
 }

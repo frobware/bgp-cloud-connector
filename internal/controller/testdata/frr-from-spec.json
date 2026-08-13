@@ -6,7 +6,7 @@
       "labels": {
         "app.kubernetes.io/managed-by": "cudn-bgp-routing-operator"
       },
-      "name": "cudn-bgp-az-1",
+      "name": "cudn-bgp-1",
       "namespace": "openshift-frr-k8s"
     },
     "spec": {
@@ -54,7 +54,7 @@
       "labels": {
         "app.kubernetes.io/managed-by": "cudn-bgp-routing-operator"
       },
-      "name": "cudn-bgp-az-2",
+      "name": "cudn-bgp-2",
       "namespace": "openshift-frr-k8s"
     },
     "spec": {

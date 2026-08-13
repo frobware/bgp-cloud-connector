@@ -15,6 +15,9 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.platform
+      name: Platform
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -46,6 +49,34 @@ spec:
             type: object
           spec:
             properties:
+              autoLabelRouterNodes:
+                description: |-
+                  AutoLabelRouterNodesSpec makes the operator maintain
+                  spec.routerNodeSelector on the nodes that should be BGP routers, instead of
+                  requiring something else to have labelled them. Without it a node added by
+                  scaling a MachineSet is silently not a router, because the MachineSet
+                  template carries no such label.
+
+                  It is opt-in: leaving it unset means the operator only ever reads Node
+                  objects, which is the right behaviour where the labels are already managed
+                  deliberately.
+                properties:
+                  eligible:
+                    additionalProperties:
+                      type: string
+                    description: Eligible selects the nodes that should be BGP routers.
+                    minProperties: 1
+                    type: object
+                  exclude:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Exclude removes a node from eligibility if it carries any of these
+                      label keys, whatever their value. Typically infra nodes.
+                    type: object
+                required:
+                - eligible
+                type: object
               aws:
                 properties:
                   region:
@@ -59,9 +90,43 @@ spec:
                 - region
                 - routeServerIDs
                 type: object
+              azure:
+                description: |-
+                  AzureConfig identifies the Azure Route Server the router nodes peer with.
+                  Azure models a Route Server as a Virtual Hub, and its own addresses and ASN
+                  are read from it rather than configured here.
+                properties:
+                  resourceGroup:
+                    minLength: 1
+                    type: string
+                  routeServerName:
+                    description: |-
+                      RouteServerName is the Azure Route Server whose BGP connections this
+                      operator manages. Its VirtualRouterIPs become the BGP neighbours.
+                    minLength: 1
+                    type: string
+                  subscriptionID:
+                    minLength: 1
+                    type: string
+                required:
+                - resourceGroup
+                - routeServerName
+                - subscriptionID
+                type: object
               bgp:
                 properties:
-                  availabilityZones:
+                  livenessDetection:
+                    default: bgp-keepalive
+                    enum:
+                    - bfd
+                    - bgp-keepalive
+                    type: string
+                  localASN:
+                    format: int64
+                    maximum: 4294967295
+                    minimum: 0
+                    type: integer
+                  peerGroups:
                     items:
                       properties:
                         neighbors:
@@ -69,6 +134,12 @@ spec:
                             properties:
                               address:
                                 type: string
+                              ebgpMultiHop:
+                                description: |-
+                                  EBGPMultiHop allows the session to be established with a peer that is
+                                  not on this node's link. Azure Route Server needs it; AWS Route Server
+                                  and GCP Cloud Router do not.
+                                type: boolean
                               remoteASN:
                                 format: int64
                                 maximum: 4294967295
@@ -89,36 +160,103 @@ spec:
                       - nodeSelector
                       type: object
                     type: array
-                  livenessDetection:
-                    default: bgp-keepalive
-                    enum:
-                    - bfd
-                    - bgp-keepalive
-                    type: string
-                  localASN:
-                    format: int64
-                    maximum: 4294967295
-                    minimum: 0
-                    type: integer
                 required:
                 - localASN
                 type: object
+              gcp:
+                properties:
+                  cloudRouterName:
+                    description: |-
+                      CloudRouterName is the Cloud Router the router nodes peer with. Its
+                      interface addresses become the BGP neighbours.
+                    minLength: 1
+                    type: string
+                  enableNestedVirtualization:
+                    default: true
+                    description: |-
+                      EnableNestedVirtualization turns on nested virtualisation on the router
+                      instances, which KubeVirt needs. Enabling it restarts the instance.
+                    type: boolean
+                  machineNamespace:
+                    default: openshift-machine-api
+                    description: |-
+                      MachineNamespace holds the OpenShift Machine objects whose preTerminate
+                      hooks gate instance deletion until BGP peers are withdrawn.
+                    type: string
+                  ncc:
+                    description: |-
+                      NCCConfig identifies the Network Connectivity Center hub the router nodes
+                      attach to as spokes.
+                    properties:
+                      hubName:
+                        minLength: 1
+                        type: string
+                      siteToSiteDataTransfer:
+                        description: |-
+                          SiteToSiteDataTransfer enables NCC site-to-site data transfer on the
+                          managed spokes.
+                        type: boolean
+                      spokePrefix:
+                        description: |-
+                          SpokePrefix names the spokes this operator manages. Spokes are numbered
+                          from it, because a hub spoke holds a limited number of instances.
+                        minLength: 1
+                        type: string
+                    required:
+                    - hubName
+                    - spokePrefix
+                    type: object
+                  project:
+                    minLength: 1
+                    type: string
+                  region:
+                    minLength: 1
+                    type: string
+                required:
+                - cloudRouterName
+                - ncc
+                - project
+                - region
+                type: object
+              platform:
+                description: |-
+                  Platform selects which cloud the operator reconciles against and which
+                  cloud-specific block below must be populated.
+                enum:
+                - AWS
+                - Azure
+                - GCP
+                - Manual
+                type: string
               routerNodeSelector:
                 additionalProperties:
                   type: string
+                description: |-
+                  RouterNodeSelector identifies the BGP router nodes. When
+                  AutoLabelRouterNodes is set the operator maintains these labels;
+                  otherwise something else must apply them.
                 type: object
             required:
             - bgp
+            - platform
             - routerNodeSelector
             type: object
             x-kubernetes-validations:
-            - message: spec.aws and spec.bgp.availabilityZones are mutually exclusive
-              rule: '!(has(self.aws) && has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones)
-                > 0)'
-            - message: spec.bgp.availabilityZones is required when spec.aws is not
-                configured
-              rule: has(self.aws) || (has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones)
+            - message: spec.aws must be set when spec.platform is AWS, and must be
+                absent otherwise
+              rule: (self.platform == 'AWS') == has(self.aws)
+            - message: spec.azure must be set when spec.platform is Azure, and must
+                be absent otherwise
+              rule: (self.platform == 'Azure') == has(self.azure)
+            - message: spec.gcp must be set when spec.platform is GCP, and must be
+                absent otherwise
+              rule: (self.platform == 'GCP') == has(self.gcp)
+            - message: spec.bgp.peerGroups is required when spec.platform is Manual
+              rule: self.platform != 'Manual' || (has(self.bgp.peerGroups) && size(self.bgp.peerGroups)
                 > 0)
+            - message: spec.bgp.peerGroups may only be set when spec.platform is Manual
+              rule: self.platform == 'Manual' || !has(self.bgp.peerGroups) || size(self.bgp.peerGroups)
+                == 0
           status:
             properties:
               aws:

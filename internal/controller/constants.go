@@ -36,7 +36,7 @@ const (
 
 	SingletonName          = "cluster"
 	FRRNamespace           = "openshift-frr-k8s"
-	FRRConfigNamePrefix    = "cudn-bgp-az-"
+	FRRConfigNamePrefix    = "cudn-bgp-"
 	CUDNNamePrefix         = "cluster-udn-"
 	RouteAdvertisementName = "cudn-bgp-route-advertisements"
 

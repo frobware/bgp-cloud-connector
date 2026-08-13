@@ -59,7 +59,7 @@ func newTestCUDNBgpConfig() *networkingv1alpha1.CUDNBgpConfig {
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,
-				AvailabilityZones: []networkingv1alpha1.AvailabilityZone{
+				PeerGroups: []networkingv1alpha1.PeerGroup{
 					{
 						NodeSelector: map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
 						Neighbors: []networkingv1alpha1.BGPNeighbor{
@@ -135,7 +135,7 @@ func TestConfigReconcile_FullReconcile(t *testing.T) {
 	// Verify FRRConfiguration was created
 	frrConfig := &unstructured.Unstructured{}
 	frrConfig.SetGroupVersionKind(FRRConfigurationGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "cudn-bgp-az-1", Namespace: FRRNamespace}, frrConfig); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "cudn-bgp-1", Namespace: FRRNamespace}, frrConfig); err != nil {
 		t.Fatalf("FRRConfiguration not created: %v", err)
 	}
 }
@@ -215,7 +215,7 @@ func (m *mockPlatform) DiscoverEndpoints(_ context.Context) (*platform.Discovery
 				RouteServerID: "rs-1",
 				RemoteASN:     64512,
 				Endpoints: []platform.DiscoveredEndpoint{
-					{EndpointID: "rse-001", AZ: "us-east-1a", Address: "10.0.1.47"},
+					{EndpointID: "rse-001", Zone: "us-east-1a", Address: "10.0.1.47"},
 				},
 			},
 		},
@@ -385,7 +385,7 @@ func TestConfigReconcile_AWSFullReconcile(t *testing.T) {
 	// Verify FRR was created from discovery
 	frrConfig := &unstructured.Unstructured{}
 	frrConfig.SetGroupVersionKind(FRRConfigurationGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "cudn-bgp-az-1", Namespace: FRRNamespace}, frrConfig); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "cudn-bgp-1", Namespace: FRRNamespace}, frrConfig); err != nil {
 		t.Fatalf("FRRConfiguration not created from discovery: %v", err)
 	}
 }
@@ -681,7 +681,7 @@ func TestConfigReconcile_DeleteSuccessful(t *testing.T) {
 			"apiVersion": "frrk8s.metallb.io/v1beta1",
 			"kind":       "FRRConfiguration",
 			"metadata": map[string]interface{}{
-				"name":      "cudn-bgp-az-1",
+				"name":      "cudn-bgp-1",
 				"namespace": FRRNamespace,
 				"labels":    map[string]interface{}{LabelManagedBy: LabelManagedByVal},
 			},
@@ -715,7 +715,7 @@ func TestConfigReconcile_DeleteSuccessful(t *testing.T) {
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(FRRConfigurationGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "cudn-bgp-az-1", Namespace: FRRNamespace}, obj); err == nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "cudn-bgp-1", Namespace: FRRNamespace}, obj); err == nil {
 		t.Error("FRRConfiguration should be deleted during cleanup")
 	}
 

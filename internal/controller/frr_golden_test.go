@@ -135,7 +135,7 @@ func TestGoldenFRRFromSpec(t *testing.T) {
 	c := frrTestClient(t)
 
 	config := goldenConfig(networkingv1alpha1.LivenessDetectionBGPKeepalive)
-	config.Spec.BGP.AvailabilityZones = []networkingv1alpha1.AvailabilityZone{
+	config.Spec.BGP.PeerGroups = []networkingv1alpha1.PeerGroup{
 		{
 			NodeSelector: map[string]string{"topology.kubernetes.io/zone": "eu-central-1a"},
 			Neighbors: []networkingv1alpha1.BGPNeighbor{
@@ -164,7 +164,7 @@ func TestGoldenFRRFromSpecBFD(t *testing.T) {
 	c := frrTestClient(t)
 
 	config := goldenConfig(networkingv1alpha1.LivenessDetectionBFD)
-	config.Spec.BGP.AvailabilityZones = []networkingv1alpha1.AvailabilityZone{
+	config.Spec.BGP.PeerGroups = []networkingv1alpha1.PeerGroup{
 		{
 			NodeSelector: map[string]string{"topology.kubernetes.io/zone": "eu-central-1a"},
 			Neighbors: []networkingv1alpha1.BGPNeighbor{
@@ -299,7 +299,7 @@ func TestGoldenFRRPrunesStale(t *testing.T) {
 	c := frrTestClient(t)
 
 	config := goldenConfig(networkingv1alpha1.LivenessDetectionBGPKeepalive)
-	config.Spec.BGP.AvailabilityZones = []networkingv1alpha1.AvailabilityZone{
+	config.Spec.BGP.PeerGroups = []networkingv1alpha1.PeerGroup{
 		{
 			NodeSelector: map[string]string{"topology.kubernetes.io/zone": "eu-central-1a"},
 			Neighbors:    []networkingv1alpha1.BGPNeighbor{{Address: "10.0.1.10", RemoteASN: 65000}},
@@ -313,7 +313,7 @@ func TestGoldenFRRPrunesStale(t *testing.T) {
 		t.Fatalf("first pass: %v", err)
 	}
 
-	config.Spec.BGP.AvailabilityZones = config.Spec.BGP.AvailabilityZones[:1]
+	config.Spec.BGP.PeerGroups = config.Spec.BGP.PeerGroups[:1]
 	if err := EnsureFRRConfigurations(ctx, c, config); err != nil {
 		t.Fatalf("second pass: %v", err)
 	}

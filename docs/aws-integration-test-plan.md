@@ -24,7 +24,7 @@ Automated test plan for the CUDN BGP Routing Operator's AWS platform integration
 
 The default credential chain (IRSA) is bypassed in unit tests via mock injection. Discovery API calls (`DescribeRouteServers`, `DescribeRouteServerEndpoints`, `DescribeSubnets`) are mocked alongside the existing peer and instance mocks.
 
-**E2E tests** read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). AWS E2E tests require `platform: AWS` with `spec.aws`; CEL rejects one without the other, and rejects `spec.bgp.availabilityZones` alongside either. The `rosa-bgp-poc` profile is provided as an example; a custom profile matching the actual ROSA deployment is needed for real testing. The test framework derives expected state from the operator's discovered `status.aws.routeServers` and cluster nodes -- no topology is hardcoded in the test code.
+**E2E tests** read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). AWS E2E tests require `platform: AWS` with `spec.aws`; CEL rejects one without the other, and rejects `spec.bgp.peerGroups` alongside either. The `rosa-bgp-poc` profile is provided as an example; a custom profile matching the actual ROSA deployment is needed for real testing. The test framework derives expected state from the operator's discovered `status.aws.routeServers` and cluster nodes -- no topology is hardcoded in the test code.
 
 | Component | How discovered |
 |:---|:---|

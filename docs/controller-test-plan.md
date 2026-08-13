@@ -2,7 +2,7 @@
 
 Tests for the CUDN BGP Routing Operator controllers and helpers. Unit tests are split into two sections:
 
-- **Basic (platform-independent)** -- tests the controller reconciliation logic with `platform: Manual` and explicit `spec.bgp.availabilityZones`, no cloud provider involved.
+- **Basic (platform-independent)** -- tests the controller reconciliation logic with `platform: Manual` and explicit `spec.bgp.peerGroups`, no cloud provider involved.
 - **Platform interface** -- tests the controller's interaction with the generic `CloudPlatform` interface (Phases 4 and 6: discovery + cloud resource reconciliation). The interface is provider-agnostic; the tests inject a mock through `PlatformBuilder` and never reach a real cloud package.
 
 The reconcile is six phases: 1 patch the Network operator, 2 wait for FRR, 3 settle which nodes are BGP routers, 4 discover cloud endpoints, 5 apply FRRConfigurations, 6 reconcile cloud resources. Phases 4 and 6 are skipped under `platform: Manual`.
@@ -18,7 +18,7 @@ The reconcile is six phases: 1 patch the Network operator, 2 wait for FRR, 3 set
 
 ## Test Configuration
 
-**Basic unit tests** use `platform: Manual` with explicit `spec.bgp.availabilityZones`:
+**Basic unit tests** use `platform: Manual` with explicit `spec.bgp.peerGroups`:
 
 | Field | Value |
 |:---|:---|
@@ -33,7 +33,7 @@ The reconcile is six phases: 1 patch the Network operator, 2 wait for FRR, 3 set
 
 AWS is only the mock's costume here. Nothing in these tests is AWS-specific beyond the spec block needed to satisfy the CEL discriminator rule, and they would read identically against `platform: GCP`. Because they all bypass the dispatch switch, they cannot catch a platform that is implemented but never wired into it -- `platform_dispatch_test.go` exists for that alone.
 
-**E2E tests** read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). Each profile contains a `cudnbgpconfig.yaml` and `cudnbgprouting.yaml` matching the target cluster. Shared E2E tests require `platform: Manual` with explicit `spec.bgp.availabilityZones`. See the `ocp-or18` profile for an example.
+**E2E tests** read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). Each profile contains a `cudnbgpconfig.yaml` and `cudnbgprouting.yaml` matching the target cluster. Shared E2E tests require `platform: Manual` with explicit `spec.bgp.peerGroups`. See the `ocp-or18` profile for an example.
 
 ---
 
@@ -51,7 +51,7 @@ Tests the controller reconciliation logic without any cloud provider configured.
 
 | ID | Test Case | Setup | Expected Result | Test |
 |:---|:---|:---|:---|:---|
-| UT-01 | Full reconcile (Phases 1, 2, 5) | Network CR exists, FRR namespace + pod running, `platform: Manual` with explicit `bgp.availabilityZones` | Network patched, FRRConfigurations created from explicit neighbours, phase=Ready with 3 conditions: `NetworkOperatorPatched`, `FRRNamespaceReady`, `FRRConfigurationApplied` | `TestConfigReconcile_FullReconcile` |
+| UT-01 | Full reconcile (Phases 1, 2, 5) | Network CR exists, FRR namespace + pod running, `platform: Manual` with explicit `bgp.peerGroups` | Network patched, FRRConfigurations created from explicit neighbours, phase=Ready with 3 conditions: `NetworkOperatorPatched`, `FRRNamespaceReady`, `FRRConfigurationApplied` | `TestConfigReconcile_FullReconcile` |
 | UT-02 | Delete blocked by routing CRs | CUDNBgpRouting CR exists | Finalizer retained, requeues every 10s | `TestConfigReconcile_DeleteBlockedByRouting` |
 | UT-02b | Manual skips the platform entirely | `platform: Manual` | No platform built, no discovery, no cloud conditions set | `TestConfigReconcile_ManualSkipsPlatform` |
 | UT-02c | Every enum value dispatches | Each value of the `spec.platform` enum | A builder exists for each; no value compiles to a runtime "no implementation" error | `TestDefaultPlatformBuilder_EveryEnumValueDispatches` |
@@ -176,13 +176,13 @@ Cleanup releases the finalizer without confirming the deletes landed. On AWS pee
 
 Platform-independent end-to-end tests that validate behavior only a real cluster with a live BGP peer can exercise — BGP session establishment, route advertisement, drift recovery, and cleanup. Unit tests cover the reconciliation logic; E2E tests verify the downstream effect on actual BGP sessions.
 
-Tests read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). The `CUDNBgpConfig` CR must use `platform: Manual` with explicit `spec.bgp.availabilityZones`.
+Tests read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). The `CUDNBgpConfig` CR must use `platform: Manual` with explicit `spec.bgp.peerGroups`.
 
 These are still Ginkgo. [docs/e2e-plan.md](e2e-plan.md) is the plan to convert them to standard library `testing` and to fix what the table below does not yet cover; read it before adding to them.
 
 | Component | How discovered |
 |:---|:---|
-| BGP neighbors, ASN, node selectors | From `CUDNBgpConfig` CR in the profile (`spec.bgp.availabilityZones`) |
+| BGP neighbors, ASN, node selectors | From `CUDNBgpConfig` CR in the profile (`spec.bgp.peerGroups`) |
 | Router nodes | Listed from cluster using CR's `routerNodeSelector` |
 | BGP session state | `BGPSessionState` CRD (`frrk8s.metallb.io/v1beta1`) |
 | FRR running config | `FRRNodeState` CRD (`frrk8s.metallb.io/v1beta1`) |
@@ -191,7 +191,7 @@ These are still Ginkgo. [docs/e2e-plan.md](e2e-plan.md) is the plan to convert t
 
 | ID | Test Case | Action | Verification |
 |:---|:---|:---|:---|
-| E2E-01 | Full stack reconcile with BGP session verification | Apply `CUDNBgpConfig` CR, create labelled namespace, apply `CUDNBgpRouting` CR | Config phase=`Ready`; one FRRConfiguration per peer group, which under `platform: Manual` is one per entry in `spec.bgp.availabilityZones`; routing phase=`Ready` with CUDN + RouteAdvertisements; `BGPSessionState` resources show `Established` for all router nodes; CUDN subnets appear in FRR advertised routes |
+| E2E-01 | Full stack reconcile with BGP session verification | Apply `CUDNBgpConfig` CR, create labelled namespace, apply `CUDNBgpRouting` CR | Config phase=`Ready`; one FRRConfiguration per peer group, which under `platform: Manual` is one per entry in `spec.bgp.peerGroups`; routing phase=`Ready` with CUDN + RouteAdvertisements; `BGPSessionState` resources show `Established` for all router nodes; CUDN subnets appear in FRR advertised routes |
 
 ### Drift Recovery
 
@@ -218,7 +218,7 @@ make test
 # Prerequisites:
 # - oc login to OCP 4.21+ cluster with an external BGP peer
 # - Operator deployed to the cluster
-# - A profile with CUDNBgpConfig using platform: Manual and explicit availabilityZones
+# - A profile with CUDNBgpConfig using platform: Manual and explicit peerGroups
 make test-e2e <profile>
 ```
 

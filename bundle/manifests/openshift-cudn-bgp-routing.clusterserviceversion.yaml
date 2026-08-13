@@ -21,6 +21,7 @@ metadata:
               "livenessDetection": "bgp-keepalive",
               "localASN": 65001
             },
+            "platform": "AWS",
             "routerNodeSelector": {
               "networking.openshift.io/cudn-bgp-router": ""
             }
@@ -45,7 +46,7 @@ metadata:
     capabilities: Basic Install
     categories: Networking
     containerImage: controller:latest
-    createdAt: "2026-08-14T13:01:18Z"
+    createdAt: "2026-08-13T13:26:02Z"
     description: Automates L3 direct routing between CUDN Pod networks and external
       networks via BGP on OpenShift. Cloud platform aware — auto-discovers BGP infrastructure
       on AWS (VPC Route Server) and works on-premise with explicit configuration.
@@ -57,9 +58,7 @@ metadata:
     features.operators.openshift.io/token-auth-azure: "false"
     features.operators.openshift.io/token-auth-gcp: "false"
     operatorframework.io/suggested-namespace: openshift-cudn-bgp-routing
-    operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine", "OpenShift
-      Container Platform", "OpenShift Platform Plus"]'
-    operators.operatorframework.io/builder: operator-sdk-v1.42.2
+    operators.operatorframework.io/builder: operator-sdk-unknown
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
   name: openshift-cudn-bgp-routing.v0.1.0
   namespace: placeholder
@@ -101,12 +100,27 @@ spec:
         - apiGroups:
           - ""
           resources:
+          - events
+          verbs:
+          - create
+          - patch
+        - apiGroups:
+          - ""
+          resources:
           - namespaces
-          - nodes
           - pods
           verbs:
           - get
           - list
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - nodes
+          verbs:
+          - get
+          - list
+          - patch
           - watch
         - apiGroups:
           - config.openshift.io
@@ -140,14 +154,14 @@ spec:
           - update
           - watch
         - apiGroups:
-          - networking.k8s.io
+          - machine.openshift.io
           resources:
-          - networkpolicies
+          - machines
           verbs:
-          - create
-          - delete
+          - get
+          - list
           - patch
-          - update
+          - watch
         - apiGroups:
           - networking.openshift.io
           resources:

@@ -5,7 +5,7 @@ import "context"
 type RouterNode struct {
 	Name       string
 	PrivateIP  string
-	AZ         string
+	Zone       string
 	ProviderID string
 }
 
@@ -23,7 +23,7 @@ type DiscoveredNeighbor struct {
 
 type DiscoveredEndpoint struct {
 	EndpointID string
-	AZ         string
+	Zone       string
 	Address    string
 }
 

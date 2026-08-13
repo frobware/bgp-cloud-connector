@@ -115,7 +115,18 @@ spec:
                 type: object
               bgp:
                 properties:
-                  availabilityZones:
+                  livenessDetection:
+                    default: bgp-keepalive
+                    enum:
+                    - bfd
+                    - bgp-keepalive
+                    type: string
+                  localASN:
+                    format: int64
+                    maximum: 4294967295
+                    minimum: 0
+                    type: integer
+                  peerGroups:
                     items:
                       properties:
                         neighbors:
@@ -149,17 +160,6 @@ spec:
                       - nodeSelector
                       type: object
                     type: array
-                  livenessDetection:
-                    default: bgp-keepalive
-                    enum:
-                    - bfd
-                    - bgp-keepalive
-                    type: string
-                  localASN:
-                    format: int64
-                    maximum: 4294967295
-                    minimum: 0
-                    type: integer
                 required:
                 - localASN
                 type: object
@@ -251,14 +251,12 @@ spec:
             - message: spec.gcp must be set when spec.platform is GCP, and must be
                 absent otherwise
               rule: (self.platform == 'GCP') == has(self.gcp)
-            - message: spec.bgp.availabilityZones is required when spec.platform is
-                Manual
-              rule: self.platform != 'Manual' || (has(self.bgp.availabilityZones)
-                && size(self.bgp.availabilityZones) > 0)
-            - message: spec.bgp.availabilityZones may only be set when spec.platform
-                is Manual
-              rule: self.platform == 'Manual' || !has(self.bgp.availabilityZones)
-                || size(self.bgp.availabilityZones) == 0
+            - message: spec.bgp.peerGroups is required when spec.platform is Manual
+              rule: self.platform != 'Manual' || (has(self.bgp.peerGroups) && size(self.bgp.peerGroups)
+                > 0)
+            - message: spec.bgp.peerGroups may only be set when spec.platform is Manual
+              rule: self.platform == 'Manual' || !has(self.bgp.peerGroups) || size(self.bgp.peerGroups)
+                == 0
           status:
             properties:
               aws:

@@ -69,7 +69,7 @@ group covering every router node. The old fields survive as AWS-private detail
 feeding `status.aws`; no other cloud populates them.
 
 **One peer group on GCP, not one per node.** Driving GCP through the explicit
-`spec.bgp.availabilityZones` path by hand produced exactly one
+`spec.bgp.peerGroups` path by hand produced exactly one
 `FRRConfiguration` and the sessions came up. A GCP subnet is regional, there is
 one Cloud Router for the region, and every node peers with the same interface
 addresses, so the zone axis had nothing to partition. The per-node
@@ -85,7 +85,7 @@ rather than behind a platform method.
 
 `spec.platform` is a required enum (`AWS`, `GCP`, `Manual`) and the cloud block
 sits beside it, with one CEL rule per cloud tying the two together and two more
-governing `spec.bgp.availabilityZones`. The choice is legible in the object and
+governing `spec.bgp.peerGroups`. The choice is legible in the object and
 in `kubectl get`; adding a cloud is one enum value plus one block.
 
 Enum values are added only alongside a working implementation. Accepting

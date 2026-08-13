@@ -47,10 +47,10 @@ func liveConfig(t *testing.T) Config {
 	return cfg
 }
 
-// TestLive_GetRouterTopology proves the vendored client, the credentials and
+// TestGCPLive_GetRouterTopology proves the vendored client, the credentials and
 // the topology parsing work against a real Cloud Router. The interface
 // addresses come back carrying a mask that the BGP neighbour must not have.
-func TestLive_GetRouterTopology(t *testing.T) {
+func TestGCPLive_GetRouterTopology(t *testing.T) {
 	cfg := liveConfig(t)
 	ctx := context.Background()
 
@@ -93,9 +93,9 @@ func TestLive_GetRouterTopology(t *testing.T) {
 	}
 }
 
-// TestLive_DiscoverEndpoints checks the peer group the controller renders,
+// TestGCPLive_DiscoverEndpoints checks the peer group the controller renders,
 // including the raw block that defeats FRR's connected check.
-func TestLive_DiscoverEndpoints(t *testing.T) {
+func TestGCPLive_DiscoverEndpoints(t *testing.T) {
 	cfg := liveConfig(t)
 	ctx := context.Background()
 
@@ -144,10 +144,10 @@ func TestLive_DiscoverEndpoints(t *testing.T) {
 	}
 }
 
-// TestLive_NATRouterIsRejected pins the guard that stops the operator being
+// TestGCPLive_NATRouterIsRejected pins the guard that stops the operator being
 // pointed at the installer's Cloud NAT router, which has no interfaces and
 // carries the cluster's egress.
-func TestLive_NATRouterIsRejected(t *testing.T) {
+func TestGCPLive_NATRouterIsRejected(t *testing.T) {
 	cfg := liveConfig(t)
 	natRouter := os.Getenv("GCP_NAT_ROUTER")
 	if natRouter == "" {

@@ -7,7 +7,7 @@
 //	KUBECONFIG=<cluster>/auth/kubeconfig \
 //	GCP_PROJECT=openshift-qe GCP_REGION=us-east1 \
 //	GCP_CLOUD_ROUTER=<infra>-bgp-router GCP_NCC_HUB=<infra>-bgp-hub \
-//	go test -tags gcplive ./internal/platform/gcp/ -run TestLiveReconcile -v
+//	go test -tags gcplive ./internal/platform/gcp/ -run TestGCPLive_ReconcileNodes -v
 //
 // This creates real cloud resources. Cleanup is opt-in via GCP_LIVE_CLEANUP=1
 // so the state can be inspected, and so a run can be repeated to prove
@@ -103,9 +103,9 @@ func liveRouterNodes(t *testing.T) ([]platform.RouterNode, client.Client) {
 	return out, c
 }
 
-// TestLiveReconcile_Nodes drives the operator's half against real GCP and
+// TestGCPLive_ReconcileNodes drives the operator's half against real GCP and
 // checks the result by reading the cloud back.
-func TestLiveReconcile_Nodes(t *testing.T) {
+func TestGCPLive_ReconcileNodes(t *testing.T) {
 	cfg := liveReconcileConfig(t)
 	ctx := context.Background()
 

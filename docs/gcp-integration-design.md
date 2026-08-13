@@ -2,46 +2,45 @@
 
 ## Scope
 
-The operator is to support AWS, Azure and GCP. Today it supports AWS. This
-describes how the GCP CUDN BGP operator in
+The operator supports AWS, GCP and Manual. Azure is to follow. This records how
+the GCP CUDN BGP operator in
 [`rh-mobb/osd-gcp-cudn-routing`](https://github.com/rh-mobb/osd-gcp-cudn-routing)
-(under `operator/`) becomes the second platform here, and how the abstraction
-it lands behind stays honest for the third.
+became the second platform here, what the abstraction it landed behind commits
+us to, and what is still open.
 
-GCP goes first because the code exists and has run in production. Azure
-follows the same shape. The test of every decision below is not "does this fit
-AWS and GCP" but "does this still hold when a third cloud arrives" -- an
-abstraction fitted to exactly two clouds usually encodes the differences
-between those two rather than the shape of the problem.
+The test of every decision below was not "does this fit AWS and GCP" but "does
+this still hold when a third cloud arrives" -- an abstraction fitted to exactly
+two clouds usually encodes the differences between those two rather than the
+shape of the problem.
 
-There are no backwards compatibility constraints. The API is `v1alpha1` with
-no consumers to protect, so breaking changes that leave the API in a better
-place should be taken now rather than deferred.
+The API is `v1alpha1` with no consumers to protect, so breaking changes that
+leave it in a better place were taken rather than deferred.
 
-It is a design proposal, not a record of agreed decisions. Every numbered
-decision below needs an answer before the code lands, and several of them are
-only answerable by the people who ran the GCP deployment.
+Stages 1 to 4 of the plan below are implemented and have run against a live
+GCP cluster. Stage 5, e2e, is not started; [docs/e2e-plan.md](e2e-plan.md) is
+the plan for it and supersedes the sketch here.
 
 ## Direction
 
-GCP moves into this repository rather than the reverse. This repository is the
+GCP moved into this repository rather than the reverse. This repository is the
 productisation path: `openshift.io` API domain, `networking` group, Konflux
 build pipeline, operator bundle, `.ci-operator.yaml`, Tekton. The rh-mobb
 repository describes itself as experimental and explicitly not a supported
-product baseline. Nothing else about the two codebases needs weighing against
-that.
+product baseline.
 
-The work is therefore an absorption, not a merge of equals. This repository
-already has the platform abstraction (`internal/platform/platform.go`) and a
-cloud-neutral controller half; the GCP operator has neither, calling
-`internal/gcp/` directly from `internal/reconciler/`. GCP is the side that
-reshapes.
+The work was therefore an absorption, not a merge of equals. This repository
+already had the platform abstraction and a cloud-neutral controller half; the
+GCP operator had neither, calling `internal/gcp/` directly from
+`internal/reconciler/`. GCP was the side that reshaped.
 
-## What already maps
+[`GUIDERAILS.md`](../GUIDERAILS.md) records the rules that merge produced,
+each with the mistake that earned it. Read it before generalising anything
+here.
 
-The two operators solve the same problem and, independently, arrived at
-substantially the same decomposition. The cloud-neutral work exists on both
-sides:
+## What mapped
+
+The two operators solved the same problem and, independently, arrived at
+substantially the same decomposition.
 
 | Concern | Here | GCP operator |
 | --- | --- | --- |
@@ -49,278 +48,176 @@ sides:
 | CUDN and RouteAdvertisements | `internal/controller/{cudn,routeadvertisements}.go` | `configure-routing.sh` (out of operator) |
 | FRRConfiguration generation | `internal/controller/frr.go` | `internal/frr/builder.go` |
 | Router node discovery | `listRouterNodes` | `internal/reconciler/nodes.go` |
+| Router node labelling | `internal/controller/router_labels.go` | `SyncRouterLabels` |
+| Machine `preTerminate` hooks | `internal/platform/gcp/machines.go` | `internal/reconciler/machines.go` |
 | Per-node cloud attribute | source/dest check | `canIpForward` |
 | Cloud peering reconcile | Route Server peers | NCC spokes plus Cloud Router peers |
 
-The three-method `CloudPlatform` contract survives the merge. GCP's
-`GetRouterTopology` is its `DiscoverEndpoints`; its combination of
-`EnsureCanIPForward`, `EnsureNestedVirtualization`, `ReconcileNCCSpokes` and
-`ReconcilePeers` is its `ReconcileNodes`; its `ClearPeers` plus spoke deletion
-is its `Cleanup`. The shape is right. The data flowing through it is not.
+## What was decided
 
-## Decisions
+### The peering plan replaced the AWS vocabulary
 
-### 1. `DiscoveryResult` is AWS-shaped
+`DiscoveryResult` was expressed in `RouteServers`, `NeighborsByAZ` and
+`EndpointsByAZ`. GCP has no route servers and no availability-zone axis for
+BGP: it has an NCC hub, per-instance spokes, and a Cloud Router whose interface
+addresses are the neighbours. Every router node peers with the same set.
 
-`platform.DiscoveryResult` is expressed in terms of `RouteServers`,
-`NeighborsByAZ` and `EndpointsByAZ`. GCP has no route servers and no
-availability-zone axis for BGP: it has an NCC hub, a per-instance spoke, and a
-Cloud Router whose interface addresses are the neighbours. Every router node
-peers with the same set.
+A platform now returns `[]PeerGroup` -- a set of nodes and the neighbours they
+share -- and the controller renders one `FRRConfiguration` per group. AWS emits
+one group per AZ, selecting on `topology.kubernetes.io/zone`. GCP emits one
+group covering every router node. The old fields survive as AWS-private detail
+feeding `status.aws`; no other cloud populates them.
 
-Proposal: replace the AWS vocabulary with a peering plan that both clouds can
-express. A platform returns groups of nodes and the neighbours each group peers
-with; the controller turns each group into one `FRRConfiguration`.
-
-```go
-// PeerGroup is a set of router nodes that share a BGP neighbour set.
-type PeerGroup struct {
-    // Key is stable across reconciles and names the generated FRRConfiguration.
-    Key string
-    // NodeSelector narrows spec.routerNodeSelector to this group's nodes.
-    NodeSelector map[string]string
-    Neighbors    []DiscoveredNeighbor
-    // RawFRRConfig, when non-empty, is emitted as spec.raw.
-    RawFRRConfig string
-}
-```
-
-AWS emits one group per AZ, selecting on `topology.kubernetes.io/zone`. GCP
-emits either one group for all router nodes or one per node, depending on
-decision 2. The existing `DiscoveryResult` fields become AWS-private detail
-used only to populate `status`.
-
-### 2. FRR granularity, and whether GCP needs per-node configurations
-
-**Settled: one peer group.** Driving GCP through the explicit
+**One peer group on GCP, not one per node.** Driving GCP through the explicit
 `spec.bgp.availabilityZones` path by hand produced exactly one
-`FRRConfiguration`, not one per zone, and the sessions came up. A GCP subnet is
-regional, there is one Cloud Router for the region, and every node peers with
-the same interface addresses, so the zone axis has nothing to partition. The
-per-node configurations the rh-mobb operator writes are defensive rather than
-required: their own note puts a single broad CR at 60% confidence and keeps
-per-node for isolation from merge conflicts.
-
-Here, one `FRRConfiguration` is generated per AZ. On GCP one is generated per
-node, selecting on `kubernetes.io/hostname`.
-
-Reading `BuildFRRConfiguration` in the GCP operator, the neighbour list comes
-from `topology.InterfaceIPs`, which does not depend on the node. Every
-generated configuration is therefore identical apart from its node selector,
-which suggests a single configuration selecting all router nodes would produce
-the same FRR state. If that is right, GCP collapses to one group and this
-decision disappears. It is an inference from the code path and has not been
-tested against a live cluster, so it needs confirming by someone who can watch
-FRR converge.
+`FRRConfiguration` and the sessions came up. A GCP subnet is regional, there is
+one Cloud Router for the region, and every node peers with the same interface
+addresses, so the zone axis had nothing to partition. The per-node
+configurations the rh-mobb operator wrote were defensive rather than required.
 
 GCP also emits a `spec.raw` block at priority 20 carrying `neighbor <ip>
 disable-connected-check`, needed because the GCP worker carries a `/32` on
-`br-ex`. AWS needs no such block. The abstraction has to carry it, hence
-`RawFRRConfig` above. It is cloud-specific but it is FRR configuration, so it
-belongs in the peering plan rather than behind a platform method.
+`br-ex`. AWS needs no such block. It rides on `PeerGroup.RawFRRConfig`: it is
+cloud-specific, but it is FRR configuration, so it belongs in the peering plan
+rather than behind a platform method.
 
-### 3. The API is not cloud-neutral
+### An explicit discriminator, not a field per cloud
 
-`CUDNBgpConfigSpec` embeds `AWS *AWSConfig` directly, `CUDNBgpConfigStatus`
-embeds `AWS *AWSStatus`, a CEL rule couples `spec.aws` to
-`spec.bgp.availabilityZones`, and two condition types are named
-`AWSEndpointsDiscovered` and `AWSResourcesReconciled`. Platform selection in
-`cudnbgpconfig_controller.go` is `if config.Spec.AWS != nil`.
+`spec.platform` is a required enum (`AWS`, `GCP`, `Manual`) and the cloud block
+sits beside it, with one CEL rule per cloud tying the two together and two more
+governing `spec.bgp.availabilityZones`. The choice is legible in the object and
+in `kubectl get`; adding a cloud is one enum value plus one block.
 
-This is the largest decision and the one most likely to be reopened later if
-taken quietly now. The options:
-
-- Add `spec.gcp` and `spec.azure` beside `spec.aws`, with a CEL rule making
-  them mutually exclusive. Smallest diff, but the spec grows a field per
-  cloud, the "exactly one of" rule becomes an N-way condition, and nothing in
-  the object says which cloud it is without inspecting which block is
-  populated.
-- Introduce an explicit discriminator (`spec.platform`) with the cloud block
-  beside it. The choice is legible in the object and in `kubectl get`, and
-  adding a cloud is one enum value plus one block.
-- Move the whole cloud block behind a discriminated union with a shared
-  `type` field.
-
-Recommendation: the second, and more clearly so at three clouds than at two.
-It keeps illegal states out of reach at admission time and does not pretend
-Go's type system is enforcing something CEL is.
-
-Enum values should be added only alongside a working implementation.
-Accepting `platform: Azure` before an Azure platform exists turns an admission
+Enum values are added only alongside a working implementation. Accepting
+`platform: Azure` before an Azure platform exists would turn an admission
 rejection into a runtime error, which is strictly worse.
 
-The condition names are API surface and appear in `status.conditions`.
-`AWSEndpointsDiscovered` and `AWSResourcesReconciled` become
-`CloudEndpointsDiscovered` and `CloudResourcesReconciled`. This belongs with
-the discriminator: renaming the conditions without changing the selection
-mechanism leaves the API half cloud-neutral, which is worse than either end
-state.
+The conditions are `CloudEndpointsDiscovered` and `CloudResourcesReconciled`.
+Renaming them without changing the selection mechanism would have left the API
+half cloud-neutral, which is worse than either end state.
 
-`status.aws` is left as a cloud-specific block parallel to `spec.aws`. That
-generalises to `status.gcp` and `status.azure`, but three sibling optional
-status blocks is a smell worth revisiting once the second one exists and it
-is clear how much of the detail is genuinely cloud-shaped.
+`status.aws` remains a cloud-specific status block with no GCP sibling; GCP
+currently writes no platform status at all. Three optional status blocks would
+be a smell, and the question of how much of that detail is genuinely
+cloud-shaped is still open.
 
-### 4. Router node selection: selector versus operator-applied label
+### The operator maintains the router node labels, opt-in
 
-Here, the user supplies `spec.routerNodeSelector` and the operator selects
-whatever matches. On GCP the operator itself chooses candidates, sorts them,
-and applies `routing.osd.redhat.com/bgp-router` to the winners
-(`SyncRouterLabels` in `internal/reconciler/nodes.go`), then removes it from
-nodes that fall out of selection.
+Two ownership models met here: AWS took whatever matched
+`spec.routerNodeSelector`, GCP chose candidates itself and applied a label to
+the winners. They are different models, not different spellings of one.
 
-These are different ownership models, not different spellings of one model.
-The GCP behaviour matters when the node set churns: it is what keeps the label,
-the Cloud Router peers, and the FRR configurations agreeing with each other.
-The AWS behaviour is simpler and puts the operator out of the business of
-mutating nodes.
+`spec.autoLabelRouterNodes` settles it without forcing either side. Set it, and
+the operator maintains the labels: `eligible` selects, `exclude` drops nodes
+carrying a key whatever its value, and labels are pruned from nodes that fall
+out. Leave it unset, and the operator only ever reads Node objects, which is
+right where the labels are already managed deliberately. It runs as Phase 3,
+before discovery, because everything downstream selects on those labels.
 
-This needs an explicit answer. If the merged operator keeps the AWS model, the
-GCP deployment needs something else to apply that label, and the rh-mobb
-Terraform currently does not. If it keeps the GCP model, the AWS side gains
-node-mutating behaviour and the RBAC to go with it.
+The reason it matters is churn: a node added by scaling a MachineSet is
+silently not a router, because the MachineSet template carries no such label.
 
-### 5. Machine `preTerminate` lifecycle hooks
+### Cloud prerequisites are reported, not created
 
-The GCP operator registers a `preTerminate` hook on each router node's Machine
-and holds it until the node's BGP peers have been withdrawn, then releases it
-(`internal/reconciler/machines.go`, steps A to C in `Reconcile`). This
-repository has no Machine handling at all -- no `preTerminate`, no
-`lifecycleHook`, no reference to `openshift-machine-api`.
+`CheckPrerequisites` is the fourth `CloudPlatform` method. It reports, read-only
+and one line per unmet requirement, the cloud configuration the operator relies
+on and deliberately does not create. The operator keeps reconciling either way,
+so that fixing one is enough, but will not claim Ready while the path cannot
+work.
 
-Without it, deleting a node races peer withdrawal: the instance disappears
-while the Cloud Router still has a peer pointing at it. Whether that matters on
-AWS depends on how Route Server handles a peer whose ENI has gone, which is
-worth establishing rather than assuming.
+It exists because the sharpest failure observed here was silent: every Route
+Server peer available, every BGP session established, FRR advertising the CUDN
+prefix, and no route table with propagation enabled, so nothing in the VPC
+could reach a pod while every signal the operator produced said healthy. AWS
+checks propagation; GCP checks that the Cloud Router has interfaces and an ASN,
+and that an ingress rule allows TCP 179.
 
-`CloudPlatform` has no slot for this and should not grow one for every
-platform. Proposal: an optional interface, type-asserted by the controller, so
-AWS is unaffected:
+### `NodeLifecycle` is optional and type-asserted
 
-```go
-// NodeLifecycle is implemented by platforms that must withdraw cloud state
-// before a node's Machine is allowed to terminate.
-type NodeLifecycle interface {
-    HoldTerminating(ctx context.Context, nodes []RouterNode) ([]RouterNode, error)
-    ReleaseTerminating(ctx context.Context, held []RouterNode) error
-}
-```
+GCP holds a `preTerminate` hook on each router node's Machine until the node's
+BGP peers have been withdrawn, then releases it. Without it, deleting a node
+races peer withdrawal: the instance disappears while the Cloud Router still has
+a peer pointing at it.
 
-### 6. The second CRD is on a different axis
+`CloudPlatform` did not grow a method for this. `NodeLifecycle`
+(`HoldTerminating` / `ReleaseTerminating`) is a separate interface the
+controller type-asserts, so a platform whose cloud tolerates a peer outliving
+its instance simply does not implement it and the controller skips the hold.
+AWS does not implement it.
 
-Here, `CUDNBgpRouting` is user-facing input declaring a CUDN to advertise. On
-GCP, `BGPRouter` is operator-authored per-node status: instance link, IP,
-`canIpForward`, nested virtualisation, conditions.
+Whether AWS needs it is unestablished. It depends on how Route Server handles a
+peer whose ENI has gone, which is worth measuring rather than assuming.
 
-Neither subsumes the other. A merged operator plausibly wants both concepts,
-giving three kinds. The alternative is to fold the per-node detail into
-`CUDNBgpConfig.status` as a list, which avoids a new kind but makes a
-cluster-scoped singleton's status grow with the node count.
-
-Recommendation: fold into status for now and revisit if the object gets
-unwieldy. A per-node CRD is easy to add later and hard to remove.
-
-### 7. Suspend
-
-GCP has `spec.suspended`, which triggers cleanup of everything the operator
-manages and pauses reconciliation while keeping the configuration. There is no
-equivalent here. It is genuinely useful for a stack that reconciles cloud
-state, and it is cheap to add, but it is new behaviour on the AWS side and
-should be an explicit yes or no rather than something inherited by accident.
-
-### 8. Dependencies
-
-A GCP platform brings `cloud.google.com/go/compute` and
-`cloud.google.com/go/networkconnectivity`, plus a credentials story. The GCP
-operator authenticates through Workload Identity Federation using a mounted
-`credential-config.json` produced by Terraform, which is a different shape from
-the AWS credential path here (`sts:GetCallerIdentity` against the default chain
-at platform construction).
-
-Both the SDK addition and the credential mechanism need agreeing before code
-lands, since this repository vendors its dependencies and the diff will be
-large.
-
-## Proposed target shape
+## Shape
 
 ```
 internal/platform/
     platform.go          RouterNode, DiscoveredNeighbor, PeerGroup,
-                         DiscoveryResult, CloudPlatform, NodeLifecycle
-    aws/                 unchanged behaviour, emits PeerGroup per AZ
-    gcp/                 new: Cloud Router topology, NCC spokes,
-                         canIpForward, nested virtualisation,
-                         Machine lifecycle hooks
-internal/controller/     unchanged responsibilities; frr.go consumes
-                         PeerGroup instead of AvailabilityZone
+                         DiscoveryResult, CloudPlatform, NodeLifecycle,
+                         CredentialError
+    aws/                 one PeerGroup per AZ, Route Server peers,
+                         source/dest check, propagation prerequisite
+    gcp/                 Cloud Router topology, NCC spokes, canIpForward,
+                         nested virtualisation, Machine lifecycle hooks,
+                         firewall and router prerequisites
+internal/controller/     cloud-neutral; frr.go consumes PeerGroup,
+                         router_labels.go maintains the node labels
 ```
 
-## Plan
+## Still open
 
-Each stage is independently reviewable and leaves the tree green. Stages 1 to
-4 are implemented on this branch; stage 5 is not started.
+**`preTerminate` sits in the wrong layer.** `internal/platform/gcp/machines.go`
+imports no Google SDK -- only apimachinery, controller-runtime and
+`machine.openshift.io/v1beta1` -- and keys on `spec.providerID` as an opaque
+string. It is an OpenShift concern filed under a cloud. By
+[`GUIDERAILS.md`](../GUIDERAILS.md) rule 6 it belongs in the controller, where
+every platform would get it; as it stands Azure would have to reimplement
+Machine handling inside its own cloud package. Node labelling made that move;
+this has not. Rule 6 also states that `NodeLifecycle` was deleted, which is not
+the case.
 
-1. Generalise `platform.DiscoveryResult` to the peering plan; port the AWS
-   implementation to emit `PeerGroup`; rewrite `frr.go` to consume it.
-   Verify: `go build ./...` and the existing unit tests pass unchanged, and the
-   `FRRConfiguration` objects generated for a given AWS discovery result are
-   byte-identical to those generated before. A golden-output test on
-   `ensureSingleFRRConfiguration` pins this before the refactor starts.
-2. Replace `if config.Spec.AWS != nil` with real platform dispatch behind the
-   decision taken in 3. Verify: a config naming an unknown platform is rejected
-   at admission, and the AWS path is unchanged.
+**Per-node state has no home.** Here `CUDNBgpRouting` is user-facing input
+declaring a CUDN to advertise; on GCP `BGPRouter` was operator-authored
+per-node status: instance link, IP, `canIpForward`, nested virtualisation,
+conditions. Neither subsumes the other. Nothing carries the per-node detail
+today. Folding it into `CUDNBgpConfig.status` as a list avoids a third kind but
+makes a cluster-scoped singleton's status grow with the node count; a per-node
+CRD is easy to add later and hard to remove. Unresolved, and currently costing
+nothing.
 
-   Implemented and verified against an OCP 4.22.8 GCP cluster: a missing
-   `spec.platform` is `Required value`, `platform: Azure` is
-   `Unsupported value: "Azure": supported values: "AWS", "GCP", "Manual"`, and
-   each mismatch between the discriminator and the cloud block is rejected by
-   the CEL rule that covers it. Envtest does not run CEL, so this cannot be
-   covered by the unit suite.
-3. Add the optional `NodeLifecycle` interface with no implementations.
-   Verify: build is unchanged, AWS behaviour is unchanged.
-4. Add `internal/platform/gcp/` implementing `CloudPlatform` and
-   `NodeLifecycle`, with fake clients mirroring `aws_test.go`.
-   Verify: unit tests against fakes; no live cluster needed.
-
-   Implemented and verified against live GCP on an OCP 4.22.8 cluster with
-   three router nodes. `ReconcileNodes` set `canIpForward` on all three
-   instances, created one NCC spoke naming them at the right addresses, and
-   wrote six Cloud Router peers, two per node across the redundant interface
-   pair, at the configured ASN. A second pass reported no change, so
-   reconciliation converges rather than fighting itself each resync.
-   Discovery against the real Cloud Router returned one peer group with both
-   interface addresses stripped of their mask and the
-   `disable-connected-check` block.
-
-   It resolves GCE identity from the node's `gce://` provider ID rather than
-   widening `platform.RouterNode`. Every provider ID on a real cluster parses
-   and resolves to the matching instance. The `preTerminate` merge patch was
-   exercised against a real apiserver, where it is idempotent and leaves
-   another operator's hooks on the same Machine untouched -- neither of which
-   the fake client can demonstrate.
-5. GCP e2e, modelled on `test/e2e/aws`.
-   Verify: against a live OSD/GCP cluster.
-
-Azure repeats stages 4 and 5 only. If it turns out to need changes to stages 1
-to 3 as well, that is the signal the abstraction was fitted to AWS and GCP
-rather than to the problem, and it should be reshaped then rather than grown
-a third special case.
-
-Stages 1 to 3 are mechanical and need no GCP knowledge. Stage 4 is where the
-decisions above start to matter, so they need answering before it starts.
-
-## Known limits
+**Suspend.** GCP had `spec.suspended`, which cleaned up everything the operator
+manages and paused reconciliation while keeping the configuration. There is no
+equivalent here and none was added. It is cheap and genuinely useful for a
+stack that reconciles cloud state, but it is new behaviour on the AWS side and
+wants an explicit yes or no.
 
 **Spoke sharding may conflict with Google's ASN rule.** An NCC spoke takes at
 most 8 router appliance instances, so `chunkRouterNodes` shards across
 `{prefix}-0`, `{prefix}-1` and so on. Google's ASN requirements state that
 different spokes must use different ASNs, while every router node here
-advertises one cluster-wide ASN taken from `spec.bgp.localASN`. Two readings:
-the rule is scoped to site-to-site data transfer and does not bind, or it
-binds and nothing has yet crossed 8 router nodes to find out. The
-configuration that would surface it is more than 8 router nodes with
-`siteToSiteDataTransfer` enabled. Until someone runs that, treat 8 router
-nodes as the tested ceiling.
+advertises one cluster-wide ASN from `spec.bgp.localASN`. Two readings: the
+rule is scoped to site-to-site data transfer and does not bind, or it binds and
+nothing has yet crossed 8 router nodes to find out. Nothing has run with more
+than four. Treat 8 as the tested ceiling.
+
+**Spoke naming carries no cluster identity.** NCC spokes are named
+`<spokePrefix>-<N>` and carry only a free-text description. Spoke names are
+unique per project and region, so two clusters in one project using the default
+`cudn-bgp-spoke` collide. AWS Route Server peers carry
+`managed-by: cudn-bgp-routing-operator/<clusterID>` and Cloud Router peers are
+named with the cluster ID; the spokes were never given the same treatment.
+
+**Questions for the GCP authors.** Two of the original five were answered by
+measurement, which establishes what the code does but not what its authors
+know. Outstanding:
+
+1. Does anything outside the operator depend on the router node label being
+   applied by the operator rather than by Terraform or a MachineSet?
+2. What breaks in practice without the `preTerminate` hook? Was it added in
+   response to an observed failure, and if so what was the symptom?
+3. Is `spec.suspended` used operationally, or was it built for development?
+
+## Known limits
 
 **The operator must not be pointed at the installer's Cloud Router.** Every
 OpenShift GCP cluster has an `<infra>-network-router` created to anchor Cloud
@@ -328,32 +225,13 @@ NAT, since a NAT gateway cannot exist without a router to hang off. It has no
 ASN and no interfaces. Writing BGP peers onto it would entangle the operator
 with the resource the cluster's egress depends on, and `Cleanup` issues a full
 update against it. `DiscoverEndpoints` rejects a router with no interfaces,
-which is exactly the shape of the NAT router, so the realistic
-misconfiguration fails at discovery instead. That check is deliberate.
-
-## Questions for the GCP authors
-
-These cannot be answered from the code:
-
-1. Answered by measurement: a single configuration selecting all router nodes
-   is what the manual run produced, and it worked. Worth confirming they know
-   of no case that needs the per-node split. (Decision 2.)
-2. Does anything outside the operator depend on the
-   `routing.osd.redhat.com/bgp-router` label being applied by the operator
-   rather than by Terraform or a MachineSet? (Decision 4.)
-3. What breaks in practice without the `preTerminate` hook? Was it added in
-   response to an observed failure, and if so what was the symptom?
-   (Decision 5.)
-4. Is `spec.suspended` used operationally, or was it built for development?
-   (Decision 7.)
-5. Is the `disable-connected-check` raw block still required on current OCP, or
-   was it a workaround for a version that has since changed? (Decision 2.)
+which is exactly the shape of the NAT router, so the realistic misconfiguration
+fails at discovery instead. That check is deliberate.
 
 ## References
 
-- `internal/platform/platform.go`, `internal/platform/aws/`
+- `internal/platform/platform.go`, `internal/platform/{aws,gcp}/`
 - `internal/controller/cudnbgpconfig_controller.go`, `internal/controller/frr.go`
 - `api/v1alpha1/cudnbgpconfig_types.go`
-- rh-mobb `operator/internal/reconciler/reconciler.go`, `operator/internal/gcp/interfaces.go`,
-  `operator/internal/frr/builder.go`, `operator/api/v1alpha1/bgproutingconfig_types.go`
+- [`GUIDERAILS.md`](../GUIDERAILS.md), [`docs/e2e-plan.md`](e2e-plan.md)
 - rh-mobb `ROSA_KNOWLEDGE.md` for the GCP and AWS behavioural comparison

@@ -52,13 +52,22 @@ const (
 // against. It is the discriminator for the cloud-specific block in the spec.
 // Values are added only alongside a working implementation, so that an
 // unsupported cloud is rejected at admission rather than at runtime.
-// +kubebuilder:validation:Enum=AWS;GCP;Manual
+// +kubebuilder:validation:Enum=AWS;Azure;GCP;Manual
 type PlatformType string
+
+// AllPlatforms is every value the enum above accepts. The dispatch test walks
+// it, so a value added to the marker and forgotten here, or added to both and
+// never given a builder, fails rather than surfacing as "no platform
+// implementation" at runtime on a live cluster.
+var AllPlatforms = []PlatformType{PlatformAWS, PlatformAzure, PlatformGCP, PlatformManual}
 
 const (
 	// PlatformAWS discovers BGP neighbours from Route Server endpoints and
 	// reconciles Route Server peers and source/dest check. Requires spec.aws.
 	PlatformAWS PlatformType = "AWS"
+	// PlatformAzure discovers BGP neighbours from an Azure Route Server and
+	// reconciles its BGP connections. Requires spec.azure.
+	PlatformAzure PlatformType = "Azure"
 	// PlatformGCP discovers BGP neighbours from the Cloud Router and
 	// reconciles NCC spokes, Cloud Router peers and GCE instance attributes.
 	// Requires spec.gcp.
@@ -175,6 +184,7 @@ type AutoLabelRouterNodesSpec struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="(self.platform == 'AWS') == has(self.aws)",message="spec.aws must be set when spec.platform is AWS, and must be absent otherwise"
+// +kubebuilder:validation:XValidation:rule="(self.platform == 'Azure') == has(self.azure)",message="spec.azure must be set when spec.platform is Azure, and must be absent otherwise"
 // +kubebuilder:validation:XValidation:rule="(self.platform == 'GCP') == has(self.gcp)",message="spec.gcp must be set when spec.platform is GCP, and must be absent otherwise"
 // +kubebuilder:validation:XValidation:rule="self.platform != 'Manual' || (has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones) > 0)",message="spec.bgp.availabilityZones is required when spec.platform is Manual"
 // +kubebuilder:validation:XValidation:rule="self.platform == 'Manual' || !has(self.bgp.availabilityZones) || size(self.bgp.availabilityZones) == 0",message="spec.bgp.availabilityZones may only be set when spec.platform is Manual"
@@ -191,7 +201,22 @@ type CUDNBgpConfigSpec struct {
 	// +optional
 	AutoLabelRouterNodes *AutoLabelRouterNodesSpec `json:"autoLabelRouterNodes,omitempty"`
 	AWS                  *AWSConfig                `json:"aws,omitempty"`
+	Azure                *AzureConfig              `json:"azure,omitempty"`
 	GCP                  *GCPConfig                `json:"gcp,omitempty"`
+}
+
+// AzureConfig identifies the Azure Route Server the router nodes peer with.
+// Azure models a Route Server as a Virtual Hub, and its own addresses and ASN
+// are read from it rather than configured here.
+type AzureConfig struct {
+	// +kubebuilder:validation:MinLength=1
+	SubscriptionID string `json:"subscriptionID"`
+	// +kubebuilder:validation:MinLength=1
+	ResourceGroup string `json:"resourceGroup"`
+	// RouteServerName is the Azure Route Server whose BGP connections this
+	// operator manages. Its VirtualRouterIPs become the BGP neighbours.
+	// +kubebuilder:validation:MinLength=1
+	RouteServerName string `json:"routeServerName"`
 }
 
 type CUDNBgpConfigStatus struct {

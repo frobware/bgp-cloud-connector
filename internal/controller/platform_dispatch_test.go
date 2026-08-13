@@ -45,12 +45,16 @@ import (
 // Infrastructure/cluster first and the fake client has none. What must not
 // happen is falling through to the default arm.
 func TestDefaultPlatformBuilder_EveryEnumValueDispatches(t *testing.T) {
-	implemented := []networkingv1alpha1.PlatformType{
-		networkingv1alpha1.PlatformAWS,
-		networkingv1alpha1.PlatformGCP,
-	}
-
-	for _, p := range implemented {
+	// Walk the enum itself rather than a list maintained here. A value added
+	// to the API and never given a builder is the failure this test exists
+	// for: buildGCPPlatform was written, compiled, passed every test and then
+	// failed on a live cluster with "no platform implementation for GCP",
+	// because every other test injects a fake through PlatformBuilder and
+	// never reaches this switch.
+	for _, p := range networkingv1alpha1.AllPlatforms {
+		if p == networkingv1alpha1.PlatformManual {
+			continue // Manual builds no platform by design.
+		}
 		t.Run(string(p), func(t *testing.T) {
 			config := newTestCUDNBgpConfigWithAWS()
 			config.Spec.Platform = p
@@ -59,6 +63,11 @@ func TestDefaultPlatformBuilder_EveryEnumValueDispatches(t *testing.T) {
 				Region:          "europe-west1",
 				CloudRouterName: "router",
 				NCC:             networkingv1alpha1.NCCConfig{HubName: "hub", SpokePrefix: "spoke"},
+			}
+			config.Spec.Azure = &networkingv1alpha1.AzureConfig{
+				SubscriptionID:  "sub-1",
+				ResourceGroup:   "rg-1",
+				RouteServerName: "rs-1",
 			}
 			c := fake.NewClientBuilder().WithScheme(configTestScheme()).Build()
 
@@ -72,7 +81,7 @@ func TestDefaultPlatformBuilder_EveryEnumValueDispatches(t *testing.T) {
 
 func TestDefaultPlatformBuilder_UnknownPlatform(t *testing.T) {
 	config := newTestCUDNBgpConfigWithAWS()
-	config.Spec.Platform = networkingv1alpha1.PlatformType("Azure")
+	config.Spec.Platform = networkingv1alpha1.PlatformType("OpenStack")
 
 	c := fake.NewClientBuilder().WithScheme(configTestScheme()).Build()
 

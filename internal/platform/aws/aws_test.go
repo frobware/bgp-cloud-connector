@@ -515,21 +515,24 @@ func TestDiscoverEndpoints_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.RouteServers) != 1 {
-		t.Fatalf("expected 1 route server, got %d", len(result.RouteServers))
+	// Six endpoints across three subnets become three peer groups, one per
+	// zone, each carrying the pair of endpoint addresses in that zone at the
+	// Route Server's ASN.
+	if len(result.PeerGroups) != 3 {
+		t.Fatalf("expected 3 peer groups, got %d", len(result.PeerGroups))
 	}
-	if result.RouteServers[0].RemoteASN != 64512 {
-		t.Errorf("expected ASN 64512, got %d", result.RouteServers[0].RemoteASN)
-	}
-	if len(result.RouteServers[0].Endpoints) != 6 {
-		t.Fatalf("expected 6 endpoints, got %d", len(result.RouteServers[0].Endpoints))
-	}
-	if len(result.NeighborsByAZ) != 3 {
-		t.Fatalf("expected 3 AZs in neighbors, got %d", len(result.NeighborsByAZ))
+	byZone := map[string][]platform.DiscoveredNeighbor{}
+	for _, g := range result.PeerGroups {
+		byZone[g.NodeSelector["topology.kubernetes.io/zone"]] = g.Neighbors
 	}
 	for _, az := range []string{"us-east-1a", "us-east-1b", "us-east-1c"} {
-		if len(result.NeighborsByAZ[az]) != 2 {
-			t.Errorf("expected 2 neighbors in %s, got %d", az, len(result.NeighborsByAZ[az]))
+		if len(byZone[az]) != 2 {
+			t.Errorf("expected 2 neighbours in %s, got %d", az, len(byZone[az]))
+		}
+		for _, n := range byZone[az] {
+			if n.ASN != 64512 {
+				t.Errorf("neighbour %s in %s has ASN %d, want the Route Server's 64512", n.Address, az, n.ASN)
+			}
 		}
 	}
 	if len(p.endpointsByAZ) != 3 {
@@ -593,11 +596,15 @@ func TestDiscoverEndpoints_MultipleRouteServers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.RouteServers) != 2 {
-		t.Fatalf("expected 2 route servers, got %d", len(result.RouteServers))
-	}
-	if len(result.NeighborsByAZ["us-east-1a"]) != 2 {
-		t.Errorf("expected 2 neighbors in us-east-1a (from 2 RS), got %d", len(result.NeighborsByAZ["us-east-1a"]))
+	// Endpoints from both route servers merge into the zone they sit in,
+	// rather than producing a group per route server.
+	for _, g := range result.PeerGroups {
+		if g.NodeSelector["topology.kubernetes.io/zone"] != "us-east-1a" {
+			continue
+		}
+		if len(g.Neighbors) != 2 {
+			t.Errorf("expected 2 neighbours in us-east-1a across both route servers, got %d", len(g.Neighbors))
+		}
 	}
 }
 

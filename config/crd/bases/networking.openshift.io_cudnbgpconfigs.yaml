@@ -259,37 +259,6 @@ spec:
                 == 0
           status:
             properties:
-              aws:
-                properties:
-                  routeServers:
-                    items:
-                      properties:
-                        endpoints:
-                          items:
-                            properties:
-                              address:
-                                type: string
-                              availabilityZone:
-                                type: string
-                              endpointID:
-                                type: string
-                            required:
-                            - address
-                            - availabilityZone
-                            - endpointID
-                            type: object
-                          type: array
-                        remoteASN:
-                          format: int64
-                          type: integer
-                        routeServerID:
-                          type: string
-                      required:
-                      - remoteASN
-                      - routeServerID
-                      type: object
-                    type: array
-                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -349,6 +318,60 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              peerGroups:
+                description: |-
+                  PeerGroups is the discovered peering plan: what the operator found in
+                  the cloud and rendered into FRRConfigurations. Empty under
+                  platform: Manual, where the plan is declared in spec.bgp.peerGroups
+                  rather than discovered.
+                items:
+                  description: |-
+                    PeerGroupStatus reports one group of the peering plan the operator
+                    discovered, and therefore what FRR was configured to peer with. Every cloud
+                    populates it, which is why it replaced the AWS-shaped status.aws: that block
+                    reported Route Server endpoints and had no GCP or Azure equivalent, so on
+                    those clouds the operator reconciled peerings and said nothing about them.
+                  properties:
+                    key:
+                      description: |-
+                        Key names the group in cloud-meaningful terms: an availability zone on
+                        AWS, the Cloud Router or Route Server name on GCP and Azure.
+                      type: string
+                    neighbors:
+                      description: Neighbors are the addresses the router nodes in
+                        this group peer with.
+                      items:
+                        properties:
+                          address:
+                            type: string
+                          ebgpMultiHop:
+                            description: |-
+                              EBGPMultiHop allows the session to be established with a peer that is
+                              not on this node's link. Azure Route Server needs it; AWS Route Server
+                              and GCP Cloud Router do not.
+                            type: boolean
+                          remoteASN:
+                            format: int64
+                            maximum: 4294967295
+                            minimum: 0
+                            type: integer
+                        required:
+                        - address
+                        - remoteASN
+                        type: object
+                      type: array
+                    nodeSelector:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        NodeSelector is the selector narrowing spec.routerNodeSelector to this
+                        group. Empty means every router node, which is what the single-group
+                        clouds emit.
+                      type: object
+                  required:
+                  - key
+                  type: object
+                type: array
               phase:
                 enum:
                 - Pending

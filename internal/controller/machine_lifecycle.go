@@ -1,4 +1,4 @@
-package gcp
+package controller
 
 import (
 	"context"
@@ -16,10 +16,17 @@ import (
 )
 
 const (
-	// LifecycleHookName gates GCE instance deletion until the node's Cloud
-	// Router peers have been withdrawn.
+	// LifecycleHookName gates instance deletion until the node's BGP peers
+	// have been withdrawn from whichever cloud it is on.
 	LifecycleHookName  = "networking.openshift.io/bgp-cleanup"
 	LifecycleHookOwner = "CUDNBgpConfig"
+
+	// MachineNamespace holds the OpenShift Machine objects. It is a constant
+	// rather than a spec field because it is the same on every OpenShift
+	// cluster, and where it is not -- a HyperShift guest cluster, whose
+	// Machines live in the management cluster -- the Machine API is absent
+	// here entirely and isMachineAPIAbsent already makes this a no-op.
+	MachineNamespace = "openshift-machine-api"
 )
 
 var machineListGVK = schema.GroupVersionKind{
@@ -34,14 +41,22 @@ var machineGVK = schema.GroupVersionKind{
 	Kind:    "Machine",
 }
 
-// HoldTerminating places a preTerminate hook on each router node's Machine and
-// reports those already terminating. Held nodes are excluded from
-// reconciliation so their peers are withdrawn, and the hook is released only
-// once that has happened.
+// HoldTerminatingRouterNodes places a preTerminate hook on each router node's
+// Machine and reports those already terminating. Held nodes are excluded from
+// cloud reconciliation so their peers are withdrawn, and the hook is released
+// only once that has happened. Without it, deleting a node races peer
+// withdrawal: the instance disappears while the cloud still has a peer
+// pointing at it.
 //
 // Machines that are no longer router nodes have the hook removed, so a node
 // dropping out of the router set does not stay blocked forever.
-func (p *Platform) HoldTerminating(ctx context.Context, nodes []platform.RouterNode) ([]platform.RouterNode, error) {
+//
+// This is an OpenShift concern, not a cloud one. It keys on spec.providerID as
+// an opaque string and touches no cloud SDK, which is why it lives here rather
+// than behind the platform interface: the GCP and Azure operators this was
+// assembled from each wrote their own copy of the same algorithm, and a third
+// cloud should not have to write a fourth.
+func HoldTerminatingRouterNodes(ctx context.Context, c client.Client, nodes []platform.RouterNode) ([]platform.RouterNode, error) {
 	byProviderID := make(map[string]platform.RouterNode, len(nodes))
 	for _, n := range nodes {
 		byProviderID[n.ProviderID] = n
@@ -49,13 +64,13 @@ func (p *Platform) HoldTerminating(ctx context.Context, nodes []platform.RouterN
 
 	var list unstructured.UnstructuredList
 	list.SetGroupVersionKind(machineListGVK)
-	if err := p.k8s.List(ctx, &list, client.InNamespace(p.cfg.MachineNamespace)); err != nil {
+	if err := c.List(ctx, &list, client.InNamespace(MachineNamespace)); err != nil {
 		if apierrors.IsNotFound(err) || isMachineAPIAbsent(err) {
 			// Not an OpenShift cluster, or the Machine API is not installed.
 			// There is nothing to gate deletion on.
 			return nil, nil
 		}
-		return nil, fmt.Errorf("listing machines in %q: %w", p.cfg.MachineNamespace, err)
+		return nil, fmt.Errorf("listing machines in %q: %w", MachineNamespace, err)
 	}
 
 	var held []platform.RouterNode
@@ -74,11 +89,11 @@ func (p *Platform) HoldTerminating(ctx context.Context, nodes []platform.RouterN
 		case isRouter && deleting && hasHook:
 			held = append(held, node)
 		case isRouter && !deleting && !hasHook:
-			if err := setLifecycleHook(ctx, p.k8s, m, true); err != nil {
+			if err := setLifecycleHook(ctx, c, m, true); err != nil {
 				return nil, fmt.Errorf("adding lifecycle hook to machine %q: %w", m.GetName(), err)
 			}
 		case !isRouter && hasHook:
-			if err := setLifecycleHook(ctx, p.k8s, m, false); err != nil {
+			if err := setLifecycleHook(ctx, c, m, false); err != nil {
 				return nil, fmt.Errorf("removing lifecycle hook from machine %q: %w", m.GetName(), err)
 			}
 		}
@@ -86,32 +101,32 @@ func (p *Platform) HoldTerminating(ctx context.Context, nodes []platform.RouterN
 	return held, nil
 }
 
-// ReleaseTerminating drops the hook, letting the Machine controller destroy
-// the instance.
-func (p *Platform) ReleaseTerminating(ctx context.Context, held []platform.RouterNode) error {
+// ReleaseTerminatingRouterNodes drops the hook, letting the Machine controller
+// destroy the instance.
+func ReleaseTerminatingRouterNodes(ctx context.Context, c client.Client, held []platform.RouterNode) error {
 	for _, node := range held {
-		m, err := p.machineForProviderID(ctx, node.ProviderID)
+		m, err := machineForProviderID(ctx, c, node.ProviderID)
 		if err != nil {
 			return err
 		}
 		if m == nil {
 			continue
 		}
-		if err := setLifecycleHook(ctx, p.k8s, m, false); err != nil {
+		if err := setLifecycleHook(ctx, c, m, false); err != nil {
 			return fmt.Errorf("releasing lifecycle hook on machine %q: %w", m.GetName(), err)
 		}
 	}
 	return nil
 }
 
-func (p *Platform) machineForProviderID(ctx context.Context, providerID string) (*unstructured.Unstructured, error) {
+func machineForProviderID(ctx context.Context, c client.Client, providerID string) (*unstructured.Unstructured, error) {
 	var list unstructured.UnstructuredList
 	list.SetGroupVersionKind(machineListGVK)
-	if err := p.k8s.List(ctx, &list, client.InNamespace(p.cfg.MachineNamespace)); err != nil {
+	if err := c.List(ctx, &list, client.InNamespace(MachineNamespace)); err != nil {
 		if apierrors.IsNotFound(err) || isMachineAPIAbsent(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("listing machines in %q: %w", p.cfg.MachineNamespace, err)
+		return nil, fmt.Errorf("listing machines in %q: %w", MachineNamespace, err)
 	}
 	for i := range list.Items {
 		m := &list.Items[i]

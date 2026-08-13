@@ -133,11 +133,6 @@ type GCPConfig struct {
 	// +optional
 	// +kubebuilder:default=true
 	EnableNestedVirtualization *bool `json:"enableNestedVirtualization,omitempty"`
-	// MachineNamespace holds the OpenShift Machine objects whose preTerminate
-	// hooks gate instance deletion until BGP peers are withdrawn.
-	// +optional
-	// +kubebuilder:default="openshift-machine-api"
-	MachineNamespace string `json:"machineNamespace,omitempty"`
 }
 
 // PeerGroupStatus reports one group of the peering plan the operator

@@ -134,6 +134,7 @@ spec:
                 - Configuring
                 - Ready
                 - Degraded
+                - Suspended
                 type: string
             type: object
         type: object

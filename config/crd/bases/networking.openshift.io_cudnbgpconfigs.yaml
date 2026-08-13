@@ -177,12 +177,6 @@ spec:
                       EnableNestedVirtualization turns on nested virtualisation on the router
                       instances, which KubeVirt needs. Enabling it restarts the instance.
                     type: boolean
-                  machineNamespace:
-                    default: openshift-machine-api
-                    description: |-
-                      MachineNamespace holds the OpenShift Machine objects whose preTerminate
-                      hooks gate instance deletion until BGP peers are withdrawn.
-                    type: string
                   ncc:
                     description: |-
                       NCCConfig identifies the Network Connectivity Center hub the router nodes

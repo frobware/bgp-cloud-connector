@@ -1,16 +1,16 @@
-//go:build gcplive
+//go:build clusterlive
 
 // Machine lifecycle hooks against a real API server. The fake client does not
 // implement merge-patch the way the apiserver does, so the patch shape in
 // machines.go can only be proven here.
 //
 //	KUBECONFIG=<cluster>/auth/kubeconfig \
-//	go test -tags gcplive ./internal/platform/gcp/ -run TestGCPLive -v
+//	go test -tags clusterlive ./internal/controller/ -run TestMachineLive -v
 //
 // This mutates real Machine objects: it adds our preTerminate hook and removes
 // it again. A preTerminate hook blocks Machine deletion while present, so the
 // removal is deferred rather than left to the end of the test body.
-package gcp
+package controller
 
 import (
 	"context"
@@ -51,10 +51,10 @@ func liveMachines(t *testing.T, c client.Client) []unstructured.Unstructured {
 	return list.Items
 }
 
-// TestGCPLive_ProviderIDsParse feeds every real provider ID on the
+// TestMachineLive_ProviderIDsParse feeds every real provider ID on the
 // cluster through the parser. A format the parser rejects would take the whole
 // GCP platform down, and the format is not something the fakes can vouch for.
-func TestGCPLive_ProviderIDsParse(t *testing.T) {
+func TestMachineLive_ProviderIDsParse(t *testing.T) {
 	c := liveK8s(t)
 
 	items := liveMachines(t, c)
@@ -83,9 +83,9 @@ func TestGCPLive_ProviderIDsParse(t *testing.T) {
 	step(t, "every provider ID parsed and named its own Machine")
 }
 
-// TestGCPLive_MachineHookRoundTrip proves the merge patch adds and removes only
+// TestMachineLive_HookRoundTrip proves the merge patch adds and removes only
 // our hook against a real apiserver.
-func TestGCPLive_MachineHookRoundTrip(t *testing.T) {
+func TestMachineLive_HookRoundTrip(t *testing.T) {
 	c := liveK8s(t)
 	ctx := context.Background()
 
@@ -109,17 +109,13 @@ func TestGCPLive_MachineHookRoundTrip(t *testing.T) {
 	name := target.GetName()
 	step(t, "using Machine %s", name)
 
-	cfg := testConfig()
-	cfg.MachineNamespace = "openshift-machine-api"
-	p := NewWithClients(cfg, &fakeCompute{}, &fakeNCC{}, c)
-
 	node := platform.RouterNode{Name: name, PrivateIP: "10.0.0.1", ProviderID: providerID}
 
 	// Always take the hook off again, however this test exits: leaving one
 	// behind would block deletion of a real machine.
 	defer func() {
 		step(t, "releasing the hook, however this test exited")
-		if err := p.ReleaseTerminating(context.Background(), []platform.RouterNode{node}); err != nil {
+		if err := ReleaseTerminatingRouterNodes(context.Background(), c, []platform.RouterNode{node}); err != nil {
 			t.Errorf("cleanup: %v", err)
 		}
 		if hasHookLive(t, c, name) {
@@ -132,7 +128,7 @@ func TestGCPLive_MachineHookRoundTrip(t *testing.T) {
 	observed(t, "hooks before %v", before)
 
 	step(t, "holding: HoldTerminating should add %s", LifecycleHookName)
-	if _, err := p.HoldTerminating(ctx, []platform.RouterNode{node}); err != nil {
+	if _, err := HoldTerminatingRouterNodes(ctx, c, []platform.RouterNode{node}); err != nil {
 		t.Fatalf("HoldTerminating: %v", err)
 	}
 
@@ -153,7 +149,7 @@ func TestGCPLive_MachineHookRoundTrip(t *testing.T) {
 
 	step(t, "checking a second pass writes nothing, so a resync does not churn the Machine")
 	rv := resourceVersionLive(t, c, name)
-	if _, err := p.HoldTerminating(ctx, []platform.RouterNode{node}); err != nil {
+	if _, err := HoldTerminatingRouterNodes(ctx, c, []platform.RouterNode{node}); err != nil {
 		t.Fatalf("second HoldTerminating: %v", err)
 	}
 	got := resourceVersionLive(t, c, name)

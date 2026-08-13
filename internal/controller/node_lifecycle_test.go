@@ -18,213 +18,198 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	networkingv1alpha1 "github.com/openshift/bgp-cloud-connector/api/v1alpha1"
-	"github.com/openshift/bgp-cloud-connector/internal/platform"
 )
 
-var errStub = errors.New("stub failure")
+// These drive the whole reconcile, where machine_lifecycle_test.go drives the
+// hold and release directly. What matters here is the ordering the hooks
+// exist for: a node whose Machine is terminating must be out of the set handed
+// to the cloud, so its peers are withdrawn before the instance goes away, and
+// the hook must come off afterwards or the Machine never finishes deleting.
+//
+// They used to assert a type assertion on an optional platform interface.
+// There is no such interface now: this is Machine API handling and every
+// platform gets it.
 
-// --- NodeLifecycle ---
-
-// mockLifecyclePlatform is a platform that also holds terminating nodes. It
-// records the order of calls so the controller's sequencing can be asserted.
-type mockLifecyclePlatform struct {
-	mockPlatform
-
-	terminating  []string // node names to report as terminating
-	calls        []string
-	heldOnHold   []platform.RouterNode
-	releasedWith []platform.RouterNode
-	holdErr      error
+func lifecycleScheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(s)
+	_ = networkingv1alpha1.AddToScheme(s)
+	s.AddKnownTypeWithName(NetworkGVK, &unstructured.Unstructured{})
+	s.AddKnownTypeWithName(NetworkGVK.GroupVersion().WithKind("NetworkList"), &unstructured.UnstructuredList{})
+	s.AddKnownTypeWithName(FRRConfigurationGVK.GroupVersion().WithKind("FRRConfiguration"), &unstructured.Unstructured{})
+	s.AddKnownTypeWithName(FRRConfigurationGVK.GroupVersion().WithKind("FRRConfigurationList"), &unstructured.UnstructuredList{})
+	s.AddKnownTypeWithName(machineGVK, &unstructured.Unstructured{})
+	s.AddKnownTypeWithName(machineListGVK, &unstructured.UnstructuredList{})
+	return s
 }
 
-func (m *mockLifecyclePlatform) HoldTerminating(_ context.Context, nodes []platform.RouterNode) ([]platform.RouterNode, error) {
-	m.calls = append(m.calls, "hold")
-	if m.holdErr != nil {
-		return nil, m.holdErr
+func lifecycleNode(name, ip string) *corev1.Node {
+	return &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+			Labels: map[string]string{
+				"networking.openshift.io/cudn-bgp-router": "",
+				"topology.kubernetes.io/zone":             "us-east-1a",
+			},
+		},
+		Spec:   corev1.NodeSpec{ProviderID: "aws:///us-east-1a/i-" + name},
+		Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: ip}}},
 	}
-	names := make(map[string]struct{}, len(m.terminating))
-	for _, n := range m.terminating {
-		names[n] = struct{}{}
-	}
-	var held []platform.RouterNode
-	for _, n := range nodes {
-		if _, ok := names[n.Name]; ok {
-			held = append(held, n)
-		}
-	}
-	m.heldOnHold = held
-	return held, nil
 }
 
-func (m *mockLifecyclePlatform) ReleaseTerminating(_ context.Context, held []platform.RouterNode) error {
-	m.calls = append(m.calls, "release")
-	m.releasedWith = held
-	return nil
-}
-
-func (m *mockLifecyclePlatform) ReconcileNodes(ctx context.Context, nodes []platform.RouterNode) error {
-	m.calls = append(m.calls, "reconcile")
-	return m.mockPlatform.ReconcileNodes(ctx, nodes)
-}
-
-func runLifecycleReconcile(t *testing.T, mock platform.CloudPlatform, wantErr bool, nodes ...*corev1.Node) *networkingv1alpha1.CUDNBgpConfig {
+// lifecycleReconciler wires a config, its nodes and their Machines together.
+func lifecycleReconciler(t *testing.T, mock *mockPlatform, withMachines bool, extra ...client.Object) *CUDNBgpConfigReconciler {
 	t.Helper()
 
 	config := newTestCUDNBgpConfigWithAWS()
-	s := configTestScheme()
+	config.Finalizers = []string{ConfigFinalizerName}
+	s := lifecycleScheme()
 
-	network := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "operator.openshift.io/v1",
-			"kind":       "Network",
-			"metadata":   map[string]interface{}{"name": "cluster"},
-			"spec":       map[string]interface{}{},
+	objs := []client.Object{
+		config,
+		&unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "operator.openshift.io/v1", "kind": "Network",
+			"metadata": map[string]interface{}{"name": "cluster"}, "spec": map[string]interface{}{},
+		}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: FRRNamespace}},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "frr-k8s-pod", Namespace: FRRNamespace,
+				Labels: map[string]string{"app": "frr-k8s"},
+			},
+			Status: corev1.PodStatus{Phase: corev1.PodRunning},
 		},
+		lifecycleNode("worker-a", "10.0.0.1"),
+		lifecycleNode("worker-b", "10.0.0.2"),
 	}
-	frrNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: FRRNamespace}}
-	frrPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "frr-k8s-pod", Namespace: FRRNamespace, Labels: map[string]string{"app": "frr-k8s"}},
-		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	if withMachines {
+		objs = append(objs,
+			newMachine("worker-a", "aws:///us-east-1a/i-worker-a", false, false),
+			newMachine("worker-b", "aws:///us-east-1a/i-worker-b", false, false),
+		)
 	}
+	objs = append(objs, extra...)
 
-	objs := []client.Object{config, network, frrNS, frrPod}
-	for _, n := range nodes {
-		objs = append(objs, n)
-	}
-
-	c := fake.NewClientBuilder().WithScheme(s).
-		WithObjects(objs...).
-		WithStatusSubresource(config).
-		Build()
-
-	r := &CUDNBgpConfigReconciler{
-		Client: c, Scheme: s,
-		PlatformBuilder: func(_ context.Context, _ client.Client, _ *networkingv1alpha1.CUDNBgpConfig) (platform.CloudPlatform, error) {
-			return mock, nil
-		},
-	}
-
-	// A single pass adds the finalizer and runs every phase, so the recorded
-	// call sequence is exactly one reconciliation's worth.
-	_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}})
-	if wantErr {
-		if err == nil {
-			t.Fatal("expected the reconcile to fail")
-		}
-	} else if err != nil {
-		t.Fatalf("reconcile error: %v", err)
-	}
-
-	updated := &networkingv1alpha1.CUDNBgpConfig{}
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "cluster"}, updated); err != nil {
-		t.Fatalf("failed to get config: %v", err)
-	}
-	return updated
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(objs...).WithStatusSubresource(config).Build()
+	return &CUDNBgpConfigReconciler{Client: c, Scheme: s, PlatformBuilder: mockPlatformBuilder(mock)}
 }
 
-// TestLifecycle_TerminatingNodeExcludedThenReleased is the reason the
-// interface exists: a node whose Machine is going away must be dropped from
-// cloud reconciliation so its peers are torn down, and only released once
-// that has happened.
+func reconcileOnce(t *testing.T, r *CUDNBgpConfigReconciler) error {
+	t.Helper()
+	_, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: SingletonName},
+	})
+	return err
+}
+
+// TestLifecycle_HooksEveryRouterNode pins that the hook goes on regardless of
+// cloud. AWS never had this behaviour before the handling moved out of the GCP
+// platform; now it does.
+func TestLifecycle_HooksEveryRouterNode(t *testing.T) {
+	r := lifecycleReconciler(t, &mockPlatform{}, true)
+	if err := reconcileOnce(t, r); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	for _, name := range []string{"worker-a", "worker-b"} {
+		if !contains(hookNames(t, r.Client, name), LifecycleHookName) {
+			t.Errorf("no preTerminate hook on %s", name)
+		}
+	}
+}
+
+// TestLifecycle_TerminatingNodeExcludedThenReleased is the ordering the whole
+// mechanism exists for.
 func TestLifecycle_TerminatingNodeExcludedThenReleased(t *testing.T) {
-	mock := &mockLifecyclePlatform{terminating: []string{"node-2"}}
-
-	runLifecycleReconcile(t, mock, false,
-		newRouterNode("node-1", "10.0.1.10", "us-east-1a", "aws:///us-east-1a/i-001"),
-		newRouterNode("node-2", "10.0.2.10", "us-east-1b", "aws:///us-east-1b/i-002"),
+	mock := &mockPlatform{}
+	dying := newMachine("worker-b", "aws:///us-east-1a/i-worker-b", true, true)
+	r := lifecycleReconciler(t, mock, false,
+		newMachine("worker-a", "aws:///us-east-1a/i-worker-a", true, false),
+		dying,
 	)
 
-	want := []string{"hold", "reconcile", "release"}
-	if len(mock.calls) != len(want) {
-		t.Fatalf("expected calls %v, got %v", want, mock.calls)
-	}
-	for i, w := range want {
-		if mock.calls[i] != w {
-			t.Fatalf("expected calls %v, got %v", want, mock.calls)
-		}
+	if err := reconcileOnce(t, r); err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
 
-	if len(mock.reconcileNodesArgs) != 1 || mock.reconcileNodesArgs[0].Name != "node-1" {
-		t.Errorf("expected only node-1 to reach ReconcileNodes, got %+v", mock.reconcileNodesArgs)
+	if len(mock.reconcileNodesArgs) != 1 || mock.reconcileNodesArgs[0].Name != "worker-a" {
+		t.Fatalf("the terminating node should be excluded so its peers are withdrawn, got %+v", mock.reconcileNodesArgs)
 	}
-	if len(mock.releasedWith) != 1 || mock.releasedWith[0].Name != "node-2" {
-		t.Errorf("expected node-2 to be released, got %+v", mock.releasedWith)
+	if contains(hookNames(t, r.Client, "worker-b"), LifecycleHookName) {
+		t.Error("the hook must be released once the peers are gone, or the Machine never finishes deleting")
 	}
 }
 
-// TestLifecycle_NothingTerminatingSkipsRelease pins that a quiet cluster does
-// no release work at all.
-func TestLifecycle_NothingTerminatingSkipsRelease(t *testing.T) {
-	mock := &mockLifecyclePlatform{}
+// TestLifecycle_NothingTerminatingKeepsHooks pins that a quiet cluster keeps
+// its hooks in place, ready for a deletion that has not happened yet.
+func TestLifecycle_NothingTerminatingKeepsHooks(t *testing.T) {
+	mock := &mockPlatform{}
+	r := lifecycleReconciler(t, mock, true)
 
-	runLifecycleReconcile(t, mock, false,
-		newRouterNode("node-1", "10.0.1.10", "us-east-1a", "aws:///us-east-1a/i-001"),
-	)
-
-	for _, call := range mock.calls {
-		if call == "release" {
-			t.Error("release must not be called when nothing is terminating")
-		}
+	if err := reconcileOnce(t, r); err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
-	if len(mock.reconcileNodesArgs) != 1 {
-		t.Errorf("expected 1 node to reach ReconcileNodes, got %d", len(mock.reconcileNodesArgs))
+	if len(mock.reconcileNodesArgs) != 2 {
+		t.Errorf("expected both nodes reconciled, got %d", len(mock.reconcileNodesArgs))
+	}
+	if !contains(hookNames(t, r.Client, "worker-a"), LifecycleHookName) {
+		t.Error("hooks should stay on a node that is not going anywhere")
 	}
 }
 
-// TestLifecycle_NotImplementedIsSkipped proves a platform without the optional
-// interface reconciles exactly as before.
-func TestLifecycle_NotImplementedIsSkipped(t *testing.T) {
+// TestLifecycle_NoMachineAPIIsANoOp is what replaced "the platform does not
+// implement the optional interface". Off OpenShift, or on a HyperShift guest
+// cluster whose Machines live in the management cluster, there is nothing to
+// gate deletion on and reconciliation must carry on regardless.
+func TestLifecycle_NoMachineAPIIsANoOp(t *testing.T) {
 	mock := &mockPlatform{}
 
-	updated := runLifecycleReconcile(t, mock, false,
-		newRouterNode("node-1", "10.0.1.10", "us-east-1a", "aws:///us-east-1a/i-001"),
-	)
+	s := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(s)
+	_ = networkingv1alpha1.AddToScheme(s)
+	s.AddKnownTypeWithName(NetworkGVK, &unstructured.Unstructured{})
+	s.AddKnownTypeWithName(NetworkGVK.GroupVersion().WithKind("NetworkList"), &unstructured.UnstructuredList{})
+	s.AddKnownTypeWithName(FRRConfigurationGVK.GroupVersion().WithKind("FRRConfiguration"), &unstructured.Unstructured{})
+	s.AddKnownTypeWithName(FRRConfigurationGVK.GroupVersion().WithKind("FRRConfigurationList"), &unstructured.UnstructuredList{})
+	// Machine is deliberately not registered.
 
+	config := newTestCUDNBgpConfigWithAWS()
+	config.Finalizers = []string{ConfigFinalizerName}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(
+		config,
+		&unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "operator.openshift.io/v1", "kind": "Network",
+			"metadata": map[string]interface{}{"name": "cluster"}, "spec": map[string]interface{}{},
+		}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: FRRNamespace}},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "frr-k8s-pod", Namespace: FRRNamespace,
+				Labels: map[string]string{"app": "frr-k8s"},
+			},
+			Status: corev1.PodStatus{Phase: corev1.PodRunning},
+		},
+		lifecycleNode("worker-a", "10.0.0.1"),
+	).WithStatusSubresource(config).Build()
+
+	r := &CUDNBgpConfigReconciler{Client: c, Scheme: s, PlatformBuilder: mockPlatformBuilder(mock)}
+	if err := reconcileOnce(t, r); err != nil {
+		t.Fatalf("reconcile should survive a cluster with no Machine API: %v", err)
+	}
 	if !mock.reconcileNodesCalled {
-		t.Fatal("expected ReconcileNodes to be called")
+		t.Error("the cloud should still be reconciled with no Machine API present")
 	}
-	if len(mock.reconcileNodesArgs) != 1 {
-		t.Errorf("expected 1 node, got %d", len(mock.reconcileNodesArgs))
-	}
-	if updated.Status.Phase != networkingv1alpha1.PhaseReady {
-		t.Errorf("expected Ready, got %s", updated.Status.Phase)
-	}
-}
-
-// TestLifecycle_HoldFailureDegrades pins that a failure to hold is surfaced
-// rather than silently reconciling a node that is going away.
-func TestLifecycle_HoldFailureDegrades(t *testing.T) {
-	mock := &mockLifecyclePlatform{holdErr: errStub}
-
-	updated := runLifecycleReconcile(t, mock, true,
-		newRouterNode("node-1", "10.0.1.10", "us-east-1a", "aws:///us-east-1a/i-001"),
-	)
-
-	if updated.Status.Phase != networkingv1alpha1.PhaseDegraded {
-		t.Errorf("expected Degraded, got %s", updated.Status.Phase)
-	}
-	if mock.reconcileNodesCalled {
-		t.Error("ReconcileNodes must not run when the hold failed")
-	}
-	for _, cond := range updated.Status.Conditions {
-		if cond.Type == networkingv1alpha1.ConditionCloudResourcesReconciled {
-			if cond.Status != metav1.ConditionFalse {
-				t.Errorf("expected %s to be False", cond.Type)
-			}
-			return
-		}
-	}
-	t.Errorf("expected a %s condition", networkingv1alpha1.ConditionCloudResourcesReconciled)
 }

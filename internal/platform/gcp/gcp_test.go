@@ -148,7 +148,7 @@ func TestDiscoverEndpoints_SingleGroup(t *testing.T) {
 		InterfaceNames: []string{"if-0", "if-1"},
 		InterfaceIPs:   []string{"169.254.0.1", "169.254.1.1"},
 	}}
-	p := NewWithClients(testConfig(), compute, &fakeNCC{}, nil)
+	p := NewWithClients(testConfig(), compute, &fakeNCC{})
 
 	result, err := p.DiscoverEndpoints(context.Background())
 	if err != nil {
@@ -181,7 +181,7 @@ func TestDiscoverEndpoints_RawConfig(t *testing.T) {
 		InterfaceNames: []string{"if-0", "if-1"},
 		InterfaceIPs:   []string{"169.254.0.1", "169.254.1.1"},
 	}}
-	p := NewWithClients(testConfig(), compute, &fakeNCC{}, nil)
+	p := NewWithClients(testConfig(), compute, &fakeNCC{})
 
 	result, err := p.DiscoverEndpoints(context.Background())
 	if err != nil {
@@ -202,7 +202,7 @@ func TestDiscoverEndpoints_RawConfig(t *testing.T) {
 
 func TestDiscoverEndpoints_NoInterfaces(t *testing.T) {
 	compute := &fakeCompute{topology: &CloudRouterTopology{ASN: 64512}}
-	p := NewWithClients(testConfig(), compute, &fakeNCC{}, nil)
+	p := NewWithClients(testConfig(), compute, &fakeNCC{})
 
 	if _, err := p.DiscoverEndpoints(context.Background()); err == nil {
 		t.Fatal("expected an error when the Cloud Router has no interfaces")
@@ -211,7 +211,7 @@ func TestDiscoverEndpoints_NoInterfaces(t *testing.T) {
 
 func TestDiscoverEndpoints_TopologyError(t *testing.T) {
 	compute := &fakeCompute{topologyErr: errors.New("permission denied")}
-	p := NewWithClients(testConfig(), compute, &fakeNCC{}, nil)
+	p := NewWithClients(testConfig(), compute, &fakeNCC{})
 
 	if _, err := p.DiscoverEndpoints(context.Background()); err == nil {
 		t.Fatal("expected the topology error to surface")
@@ -227,7 +227,7 @@ func TestReconcileNodes(t *testing.T) {
 		InterfaceIPs:   []string{"169.254.0.1"},
 	}}
 	ncc := &fakeNCC{}
-	p := NewWithClients(testConfig(), compute, ncc, nil)
+	p := NewWithClients(testConfig(), compute, ncc)
 
 	nodes := []platform.RouterNode{
 		node("worker-b", "10.0.0.3", "europe-west1-b"),
@@ -267,7 +267,7 @@ func TestReconcileNodes_NestedVirtDisabled(t *testing.T) {
 	}}
 	cfg := testConfig()
 	cfg.NestedVirt = false
-	p := NewWithClients(cfg, compute, &fakeNCC{}, nil)
+	p := NewWithClients(cfg, compute, &fakeNCC{})
 
 	if err := p.ReconcileNodes(context.Background(), []platform.RouterNode{node("worker-a", "10.0.0.2", "europe-west1-a")}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -278,7 +278,7 @@ func TestReconcileNodes_NestedVirtDisabled(t *testing.T) {
 }
 
 func TestReconcileNodes_RejectsNonGCEProviderID(t *testing.T) {
-	p := NewWithClients(testConfig(), &fakeCompute{}, &fakeNCC{}, nil)
+	p := NewWithClients(testConfig(), &fakeCompute{}, &fakeNCC{})
 
 	nodes := []platform.RouterNode{{Name: "worker-a", PrivateIP: "10.0.0.2", ProviderID: "aws:///us-east-1a/i-0abc"}}
 	if err := p.ReconcileNodes(context.Background(), nodes); err == nil {
@@ -294,7 +294,7 @@ func TestReconcileSpokes_ChunksAndPrunes(t *testing.T) {
 		ASN: 64512, InterfaceNames: []string{"if-0"}, InterfaceIPs: []string{"169.254.0.1"},
 	}}
 	ncc := &fakeNCC{existing: []string{"spoke-0", "spoke-1", "spoke-2"}}
-	p := NewWithClients(testConfig(), compute, ncc, nil)
+	p := NewWithClients(testConfig(), compute, ncc)
 
 	var nodes []platform.RouterNode
 	for _, n := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i"} {
@@ -320,7 +320,7 @@ func TestReconcileSpokes_ChunksAndPrunes(t *testing.T) {
 func TestCleanup(t *testing.T) {
 	compute := &fakeCompute{}
 	ncc := &fakeNCC{existing: []string{"spoke-0", "spoke-1"}}
-	p := NewWithClients(testConfig(), compute, ncc, nil)
+	p := NewWithClients(testConfig(), compute, ncc)
 
 	if err := p.Cleanup(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -333,16 +333,12 @@ func TestCleanup(t *testing.T) {
 	}
 }
 
-// TestPlatformSatisfiesInterfaces is a compile-time check that the GCP
-// platform is usable by the controller and opts into node lifecycle handling.
-func TestPlatformSatisfiesInterfaces(t *testing.T) {
-	var p any = &Platform{}
-	if _, ok := p.(platform.CloudPlatform); !ok {
-		t.Error("Platform does not implement platform.CloudPlatform")
-	}
-	if _, ok := p.(platform.NodeLifecycle); !ok {
-		t.Error("Platform does not implement platform.NodeLifecycle")
-	}
+// TestPlatformSatisfiesInterface is a compile-time check that the GCP platform
+// is usable by the controller. It used to also assert NodeLifecycle, which no
+// longer exists: Machine handling moved to the controller, where every
+// platform gets it.
+func TestPlatformSatisfiesInterface(t *testing.T) {
+	var _ platform.CloudPlatform = (*Platform)(nil)
 }
 
 // --- Prerequisites ---
@@ -355,7 +351,7 @@ func TestCheckPrerequisites_NoFirewall(t *testing.T) {
 		topology:    &CloudRouterTopology{ASN: 64512, InterfaceNames: []string{"if-0"}, InterfaceIPs: []string{"10.0.128.5"}},
 		bgpFirewall: false,
 	}
-	p := NewWithClients(testConfig(), compute, &fakeNCC{}, nil)
+	p := NewWithClients(testConfig(), compute, &fakeNCC{})
 
 	unmet, err := p.CheckPrerequisites(context.Background())
 	if err != nil {
@@ -370,7 +366,7 @@ func TestCheckPrerequisites_NoFirewall(t *testing.T) {
 // interfaces, no ASN, and the resource the cluster's egress depends on.
 func TestCheckPrerequisites_NATRouter(t *testing.T) {
 	compute := &fakeCompute{topology: &CloudRouterTopology{}, bgpFirewall: true}
-	p := NewWithClients(testConfig(), compute, &fakeNCC{}, nil)
+	p := NewWithClients(testConfig(), compute, &fakeNCC{})
 
 	unmet, err := p.CheckPrerequisites(context.Background())
 	if err != nil {
@@ -386,7 +382,7 @@ func TestCheckPrerequisites_Satisfied(t *testing.T) {
 		topology:    &CloudRouterTopology{ASN: 64512, InterfaceNames: []string{"if-0"}, InterfaceIPs: []string{"10.0.128.5"}},
 		bgpFirewall: true,
 	}
-	p := NewWithClients(testConfig(), compute, &fakeNCC{}, nil)
+	p := NewWithClients(testConfig(), compute, &fakeNCC{})
 
 	unmet, err := p.CheckPrerequisites(context.Background())
 	if err != nil {

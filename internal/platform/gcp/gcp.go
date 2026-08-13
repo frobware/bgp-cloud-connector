@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openshift/bgp-cloud-connector/internal/platform"
@@ -39,12 +38,10 @@ type Platform struct {
 	cfg     Config
 	compute ComputeClient
 	ncc     NCCClient
-	// k8s reads and patches Machine objects for the preTerminate hooks.
-	k8s client.Client
 }
 
 // New builds a Platform against the live Google APIs.
-func New(ctx context.Context, cfg Config, k8s client.Client) (*Platform, error) {
+func New(ctx context.Context, cfg Config) (*Platform, error) {
 	computeClient, err := NewComputeClient(ctx, cfg.Project, cfg.Region)
 	if err != nil {
 		return nil, &platform.CredentialError{Msg: fmt.Sprintf("GCP compute client: %v", err)}
@@ -53,12 +50,12 @@ func New(ctx context.Context, cfg Config, k8s client.Client) (*Platform, error) 
 	if err != nil {
 		return nil, &platform.CredentialError{Msg: fmt.Sprintf("GCP network connectivity client: %v", err)}
 	}
-	return NewWithClients(cfg, computeClient, nccClient, k8s), nil
+	return NewWithClients(cfg, computeClient, nccClient), nil
 }
 
 // NewWithClients builds a Platform against supplied clients.
-func NewWithClients(cfg Config, computeClient ComputeClient, nccClient NCCClient, k8s client.Client) *Platform {
-	return &Platform{cfg: cfg, compute: computeClient, ncc: nccClient, k8s: k8s}
+func NewWithClients(cfg Config, computeClient ComputeClient, nccClient NCCClient) *Platform {
+	return &Platform{cfg: cfg, compute: computeClient, ncc: nccClient}
 }
 
 // DiscoverEndpoints reads the Cloud Router and returns a single peer group.

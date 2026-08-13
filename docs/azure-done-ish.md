@@ -116,6 +116,25 @@ Concretely, these are assumptions until something runs:
 
 ## To finish it
 
+0. Get a cluster. This is currently blocked before any of the below, and not
+   on anything technical: an Azure IPI install needs a service principal
+   holding Contributor and User Access Administrator on the subscription,
+   because the install writes role assignments for the cluster's own
+   identities. We hold Contributor, whose `notActions` explicitly deny
+   `Microsoft.Authorization/*/Write`, so we can register the application and
+   cannot grant it anything. Confirmed against subscription
+   53b8f551-f0fc-4bea-8cba-6d1fefd54c8a on 13 August 2026: `az ad sp
+   create-for-rbac` succeeds and produces an identity with zero role
+   assignments, and `az role assignment create` returns AuthorizationFailed.
+   Someone with Owner or User Access Administrator has to grant either the
+   service principal both roles, or us User Access Administrator.
+
+   Everything else an Azure install needs is already in place: the public DNS
+   zone `qe.azure.devcluster.openshift.com` in resource group `os4-common`,
+   ample vCPU quota, a pull secret and an SSH key. Note that a stale
+   `~/.azure/osServicePrincipal.json` from 2023 names a different subscription
+   and the installer reads it in preference to prompting.
+
 1. Build a Route Server. `aro-bgp`'s Terraform is the Azure equivalent of
    `gcp-create-cloud-router --prerequisites-only`; check whether it can be run
    for the prerequisites alone, because building the peerings too would leave

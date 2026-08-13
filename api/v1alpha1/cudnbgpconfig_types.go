@@ -28,7 +28,7 @@ const (
 	LivenessDetectionBGPKeepalive LivenessDetectionType = "bgp-keepalive"
 )
 
-// +kubebuilder:validation:Enum=Pending;Configuring;Ready;Degraded
+// +kubebuilder:validation:Enum=Pending;Configuring;Ready;Degraded;Suspended
 type PhaseType string
 
 const (
@@ -36,6 +36,7 @@ const (
 	PhaseConfiguring PhaseType = "Configuring"
 	PhaseReady       PhaseType = "Ready"
 	PhaseDegraded    PhaseType = "Degraded"
+	PhaseSuspended   PhaseType = "Suspended"
 )
 
 const (
@@ -46,6 +47,7 @@ const (
 	ConditionFRRConfigurationApplied  = "FRRConfigurationApplied"
 	ConditionCloudResourcesReconciled = "CloudResourcesReconciled"
 	ConditionPrerequisitesSatisfied   = "PrerequisitesSatisfied"
+	ConditionSuspended                = "Suspended"
 )
 
 // PlatformType selects which cloud the operator reconciles BGP peering
@@ -203,9 +205,29 @@ type CUDNBgpConfigSpec struct {
 	RouterNodeSelector map[string]string `json:"routerNodeSelector"`
 	// +optional
 	AutoLabelRouterNodes *AutoLabelRouterNodesSpec `json:"autoLabelRouterNodes,omitempty"`
-	AWS                  *AWSConfig                `json:"aws,omitempty"`
-	Azure                *AzureConfig              `json:"azure,omitempty"`
-	GCP                  *GCPConfig                `json:"gcp,omitempty"`
+	// Suspended releases everything the operator created in the cloud and
+	// stops reconciling, keeping the configuration. It is not a deletion:
+	// the finalizer stays and clearing the field brings everything back,
+	// where deleting the CR would mean writing it again to resume.
+	//
+	// The Network operator patch is deliberately not reverted, for the same
+	// reason teardown does not revert it: undoing
+	// additionalRoutingCapabilities restarts OVN-Kubernetes on every node.
+	// +optional
+	Suspended bool `json:"suspended,omitempty"`
+	// RequireReadyNodes drops nodes that are not Ready from the router set,
+	// so the cloud stops sending traffic to a node that cannot forward it.
+	//
+	// It is off by default because turning it on churns cloud peerings
+	// whenever a node reboots: the peering is removed as the node goes
+	// NotReady and recreated when it returns. Whether that trade is worth
+	// making depends on how long your nodes stay NotReady, which is not
+	// something this operator can know.
+	// +optional
+	RequireReadyNodes bool         `json:"requireReadyNodes,omitempty"`
+	AWS               *AWSConfig   `json:"aws,omitempty"`
+	Azure             *AzureConfig `json:"azure,omitempty"`
+	GCP               *GCPConfig   `json:"gcp,omitempty"`
 }
 
 // AzureConfig identifies the Azure Route Server the router nodes peer with.

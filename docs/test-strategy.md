@@ -121,7 +121,7 @@ type CloudPlatform interface {
 
 `DiscoverEndpoints` returns a cloud-neutral peering plan: a list of `PeerGroup`, each a set of router nodes sharing a BGP neighbour set, which the controller renders one-for-one into `FRRConfiguration` objects. How a cloud groups is its own business. AWS emits one group per availability zone, selecting on `topology.kubernetes.io/zone`; GCP emits a single group covering every router node, because one regional Cloud Router's interface addresses are the neighbours for all of them. A group may also carry `RawFRRConfig`, emitted as `spec.raw`, for directives the structured neighbour API cannot express.
 
-`DiscoveryResult` also carries `RouteServers`, `NeighborsByAZ` and `EndpointsByAZ`. Those are AWS-shaped, feed `status.aws` only, and are populated by no other cloud. Do not write new tests against them.
+`DiscoveryResult` carries nothing else. It used to also carry `RouteServers`, `NeighborsByAZ` and `EndpointsByAZ`, which only AWS populated and only `status.aws` consumed; both are gone, and the discovered plan is reported cloud-neutrally as `status.peerGroups`.
 
 `CheckPrerequisites` reports cloud configuration the operator relies on but deliberately does not create, one human-readable line per unmet requirement. It is read-only. It exists because the sharpest failures here are silent: on AWS a route server propagating to no route table leaves every peer available and every session established while nothing in the VPC can reach a pod.
 

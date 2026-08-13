@@ -65,8 +65,8 @@ addresses are the neighbours. Every router node peers with the same set.
 A platform now returns `[]PeerGroup` -- a set of nodes and the neighbours they
 share -- and the controller renders one `FRRConfiguration` per group. AWS emits
 one group per AZ, selecting on `topology.kubernetes.io/zone`. GCP emits one
-group covering every router node. The old fields survive as AWS-private detail
-feeding `status.aws`; no other cloud populates them.
+group covering every router node. The AWS-shaped fields that used to sit beside them are gone; the plan
+itself is what reaches `status.peerGroups`.
 
 **One peer group on GCP, not one per node.** Driving GCP through the explicit
 `spec.bgp.peerGroups` path by hand produced exactly one
@@ -96,10 +96,10 @@ The conditions are `CloudEndpointsDiscovered` and `CloudResourcesReconciled`.
 Renaming them without changing the selection mechanism would have left the API
 half cloud-neutral, which is worse than either end state.
 
-`status.aws` remains a cloud-specific status block with no GCP sibling; GCP
-currently writes no platform status at all. Three optional status blocks would
-be a smell, and the question of how much of that detail is genuinely
-cloud-shaped is still open.
+`status.aws` is gone. It reported Route Server IDs and endpoints, which no
+other cloud has, so GCP and Azure reconciled cloud state and reported nothing.
+`status.peerGroups` replaced it with what every cloud produces: the discovered
+plan, as group key, node selector and neighbours.
 
 ### The operator maintains the router node labels, opt-in
 

@@ -111,6 +111,10 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 	}
 
+	if config.Spec.Suspended {
+		return r.reconcileSuspended(ctx, config, *baselineStatus)
+	}
+
 	config.Status.Phase = networkingv1alpha1.PhaseConfiguring
 	config.Status.ObservedGeneration = config.Generation
 
@@ -483,6 +487,10 @@ func (r *CUDNBgpConfigReconciler) listRouterNodes(ctx context.Context, config *n
 				break
 			}
 		}
+		if config.Spec.RequireReadyNodes && !nodeIsReady(node) {
+			logf.FromContext(ctx).Info("skipping node that is not Ready", "node", node.Name)
+			continue
+		}
 		if rn.PrivateIP == "" || rn.Zone == "" || rn.ProviderID == "" {
 			logf.FromContext(ctx).Info("skipping node with incomplete info",
 				"node", node.Name, "ip", rn.PrivateIP, "az", rn.Zone, "providerID", rn.ProviderID)
@@ -648,4 +656,74 @@ func (r *CUDNBgpConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		)).
 		Named("cudnbgpconfig").
 		Complete(r)
+}
+
+// nodeIsReady reports the node's Ready condition. A node that has never
+// reported one is not ready: absence is not readiness.
+func nodeIsReady(node *corev1.Node) bool {
+	for _, cond := range node.Status.Conditions {
+		if cond.Type == corev1.NodeReady {
+			return cond.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+// reconcileSuspended releases what the operator created and stops. It runs
+// before every phase, so nothing is patched, discovered or reconciled while
+// suspended.
+//
+// Cleanup is idempotent on all three clouds, which is what lets this run on
+// every pass rather than needing a "have I already torn down" flag in status.
+func (r *CUDNBgpConfigReconciler) reconcileSuspended(
+	ctx context.Context,
+	config *networkingv1alpha1.CUDNBgpConfig,
+	baseline networkingv1alpha1.CUDNBgpConfigStatus,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	if config.Spec.Platform != networkingv1alpha1.PlatformManual {
+		buildPlatform := r.PlatformBuilder
+		if buildPlatform == nil {
+			buildPlatform = defaultPlatformBuilder
+		}
+		cloud, err := buildPlatform(ctx, r.Client, config)
+		if err != nil {
+			// A credential that has expired must not strand a suspend, for the
+			// same reason it must not strand a delete.
+			log.Info("suspended: could not build the platform to clean up", "error", err)
+		} else if err := cloud.Cleanup(ctx); err != nil {
+			return r.setDegraded(ctx, config, baseline, networkingv1alpha1.ConditionSuspended,
+				"CleanupFailed", fmt.Sprintf("failed to release cloud resources while suspending: %v", err))
+		}
+	}
+
+	if err := DeleteFRRConfigurations(ctx, r.Client); err != nil {
+		return r.setDegraded(ctx, config, baseline, networkingv1alpha1.ConditionSuspended,
+			"CleanupFailed", fmt.Sprintf("failed to remove generated FRRConfigurations while suspending: %v", err))
+	}
+
+	if config.Spec.AutoLabelRouterNodes != nil {
+		if _, err := RemoveAllRouterLabels(ctx, r.Client, config); err != nil {
+			return r.setDegraded(ctx, config, baseline, networkingv1alpha1.ConditionSuspended,
+				"CleanupFailed", fmt.Sprintf("failed to remove router node labels while suspending: %v", err))
+		}
+	}
+
+	err := r.patchConfigStatus(ctx, config, baseline, func(c *networkingv1alpha1.CUDNBgpConfig) {
+		c.Status.Phase = networkingv1alpha1.PhaseSuspended
+		c.Status.ObservedGeneration = c.Generation
+		c.Status.PeerGroups = nil
+		// The phases that no longer ran have nothing to say, and leaving their
+		// last verdict behind would report a healthy stack that is not running.
+		c.Status.Conditions = nil
+		meta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
+			Type:               networkingv1alpha1.ConditionSuspended,
+			Status:             metav1.ConditionTrue,
+			Reason:             "Suspended",
+			Message:            "spec.suspended is set: cloud resources released and reconciliation paused",
+			ObservedGeneration: c.Generation,
+		})
+	})
+	return ctrl.Result{}, err
 }

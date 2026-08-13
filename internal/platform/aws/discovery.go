@@ -16,10 +16,14 @@ import (
 func (p *Platform) DiscoverEndpoints(ctx context.Context) (*platform.DiscoveryResult, error) {
 	logger := log.FromContext(ctx)
 
-	result := &platform.DiscoveryResult{
-		NeighborsByAZ: make(map[string][]platform.DiscoveredNeighbor),
-		EndpointsByAZ: make(map[string][]string),
-	}
+	result := &platform.DiscoveryResult{}
+
+	// Per zone, and private to this package: AWS Route Server endpoints are
+	// per subnet and therefore per zone, which is why AWS is the only cloud
+	// emitting more than one peer group. The endpoint map is kept because
+	// peer reconciliation needs to know which endpoints belong to which zone.
+	neighborsByZone := make(map[string][]platform.DiscoveredNeighbor)
+	endpointsByZone := make(map[string][]string)
 
 	for _, rsID := range p.routeServerIDs {
 		rs, err := p.describeRouteServer(ctx, rsID)
@@ -46,11 +50,6 @@ func (p *Platform) DiscoverEndpoints(ctx context.Context) (*platform.DiscoveryRe
 			return nil, fmt.Errorf("resolving subnet AZs for route server %s: %w", rsID, err)
 		}
 
-		discoveredRS := platform.DiscoveredRouteServer{
-			RouteServerID: rsID,
-			RemoteASN:     remoteASN,
-		}
-
 		for _, ep := range endpoints {
 			epID := aws.ToString(ep.RouteServerEndpointId)
 			address := aws.ToString(ep.EniAddress)
@@ -59,25 +58,18 @@ func (p *Platform) DiscoverEndpoints(ctx context.Context) (*platform.DiscoveryRe
 
 			logger.Info("discovered endpoint", "endpointID", epID, "az", az, "address", address)
 
-			discoveredRS.Endpoints = append(discoveredRS.Endpoints, platform.DiscoveredEndpoint{
-				EndpointID: epID,
-				Zone:       az,
-				Address:    address,
-			})
-
-			result.NeighborsByAZ[az] = append(result.NeighborsByAZ[az], platform.DiscoveredNeighbor{
+			neighborsByZone[az] = append(neighborsByZone[az], platform.DiscoveredNeighbor{
 				Address: address,
 				ASN:     remoteASN,
 			})
-			result.EndpointsByAZ[az] = append(result.EndpointsByAZ[az], epID)
+			endpointsByZone[az] = append(endpointsByZone[az], epID)
 		}
 
-		result.RouteServers = append(result.RouteServers, discoveredRS)
 	}
 
-	result.PeerGroups = peerGroupsByAZ(result.NeighborsByAZ)
+	result.PeerGroups = peerGroupsByAZ(neighborsByZone)
 
-	p.endpointsByAZ = result.EndpointsByAZ
+	p.endpointsByAZ = endpointsByZone
 	return result, nil
 }
 

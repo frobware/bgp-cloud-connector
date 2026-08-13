@@ -236,9 +236,7 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudEndpointsDiscovered,
 				"CloudDiscoveryFailed", fmt.Sprintf("failed to discover cloud BGP endpoints: %v", err))
 		}
-		if config.Spec.Platform == networkingv1alpha1.PlatformAWS {
-			config.Status.AWS = discoveryResultToStatus(discoveryResult)
-		}
+		config.Status.PeerGroups = peerGroupsToStatus(discoveryResult.PeerGroups)
 		meta.SetStatusCondition(&config.Status.Conditions, metav1.Condition{
 			Type:               networkingv1alpha1.ConditionCloudEndpointsDiscovered,
 			Status:             metav1.ConditionTrue,
@@ -331,23 +329,26 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	return ctrl.Result{RequeueAfter: r.resyncInterval()}, nil
 }
 
-func discoveryResultToStatus(dr *platform.DiscoveryResult) *networkingv1alpha1.AWSStatus {
-	status := &networkingv1alpha1.AWSStatus{}
-	for _, rs := range dr.RouteServers {
-		drs := networkingv1alpha1.DiscoveredRouteServer{
-			RouteServerID: rs.RouteServerID,
-			RemoteASN:     rs.RemoteASN,
+func peerGroupsToStatus(groups []platform.PeerGroup) []networkingv1alpha1.PeerGroupStatus {
+	if len(groups) == 0 {
+		return nil
+	}
+	out := make([]networkingv1alpha1.PeerGroupStatus, 0, len(groups))
+	for _, g := range groups {
+		pg := networkingv1alpha1.PeerGroupStatus{
+			Key:          g.Key,
+			NodeSelector: g.NodeSelector,
 		}
-		for _, ep := range rs.Endpoints {
-			drs.Endpoints = append(drs.Endpoints, networkingv1alpha1.DiscoveredEndpoint{
-				EndpointID:       ep.EndpointID,
-				AvailabilityZone: ep.Zone,
-				Address:          ep.Address,
+		for _, n := range g.Neighbors {
+			pg.Neighbors = append(pg.Neighbors, networkingv1alpha1.BGPNeighbor{
+				Address:      n.Address,
+				RemoteASN:    n.ASN,
+				EBGPMultiHop: n.EBGPMultiHop,
 			})
 		}
-		status.RouteServers = append(status.RouteServers, drs)
+		out = append(out, pg)
 	}
-	return status
+	return out
 }
 
 // excludeNodes returns nodes with everything in remove filtered out, matching

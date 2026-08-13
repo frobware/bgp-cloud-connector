@@ -21,18 +21,6 @@ type DiscoveredNeighbor struct {
 	EBGPMultiHop bool
 }
 
-type DiscoveredEndpoint struct {
-	EndpointID string
-	Zone       string
-	Address    string
-}
-
-type DiscoveredRouteServer struct {
-	RouteServerID string
-	RemoteASN     int64
-	Endpoints     []DiscoveredEndpoint
-}
-
 // PeerGroup is a set of router nodes sharing a BGP neighbour set. Each group
 // becomes one FRRConfiguration. Clouds group differently: AWS peers per
 // availability zone, so it emits one group per AZ; a cloud whose router
@@ -53,14 +41,14 @@ type PeerGroup struct {
 	RawFRRConfig string
 }
 
+// DiscoveryResult is the peering plan a cloud reports. It carries nothing
+// cloud-specific: it used to also carry RouteServers, NeighborsByAZ and
+// EndpointsByAZ, which only AWS populated and only status.aws consumed, so a
+// shared type described one cloud's shape and the other two left it empty.
 type DiscoveryResult struct {
-	// PeerGroups is what the controller renders into FRRConfigurations.
+	// PeerGroups is what the controller renders into FRRConfigurations, and
+	// what it reports in status.
 	PeerGroups []PeerGroup
-
-	// The fields below are AWS-shaped and feed status reporting only.
-	RouteServers  []DiscoveredRouteServer
-	NeighborsByAZ map[string][]DiscoveredNeighbor
-	EndpointsByAZ map[string][]string
 }
 
 type CloudPlatform interface {

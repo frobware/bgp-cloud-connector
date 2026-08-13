@@ -138,20 +138,23 @@ type GCPConfig struct {
 	MachineNamespace string `json:"machineNamespace,omitempty"`
 }
 
-type DiscoveredEndpoint struct {
-	EndpointID       string `json:"endpointID"`
-	AvailabilityZone string `json:"availabilityZone"`
-	Address          string `json:"address"`
-}
-
-type DiscoveredRouteServer struct {
-	RouteServerID string               `json:"routeServerID"`
-	RemoteASN     int64                `json:"remoteASN"`
-	Endpoints     []DiscoveredEndpoint `json:"endpoints,omitempty"`
-}
-
-type AWSStatus struct {
-	RouteServers []DiscoveredRouteServer `json:"routeServers,omitempty"`
+// PeerGroupStatus reports one group of the peering plan the operator
+// discovered, and therefore what FRR was configured to peer with. Every cloud
+// populates it, which is why it replaced the AWS-shaped status.aws: that block
+// reported Route Server endpoints and had no GCP or Azure equivalent, so on
+// those clouds the operator reconciled peerings and said nothing about them.
+type PeerGroupStatus struct {
+	// Key names the group in cloud-meaningful terms: an availability zone on
+	// AWS, the Cloud Router or Route Server name on GCP and Azure.
+	Key string `json:"key"`
+	// NodeSelector is the selector narrowing spec.routerNodeSelector to this
+	// group. Empty means every router node, which is what the single-group
+	// clouds emit.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// Neighbors are the addresses the router nodes in this group peer with.
+	// +optional
+	Neighbors []BGPNeighbor `json:"neighbors,omitempty"`
 }
 
 type BGPConfig struct {
@@ -223,7 +226,12 @@ type CUDNBgpConfigStatus struct {
 	Phase              PhaseType          `json:"phase,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
-	AWS                *AWSStatus         `json:"aws,omitempty"`
+	// PeerGroups is the discovered peering plan: what the operator found in
+	// the cloud and rendered into FRRConfigurations. Empty under
+	// platform: Manual, where the plan is declared in spec.bgp.peerGroups
+	// rather than discovered.
+	// +optional
+	PeerGroups []PeerGroupStatus `json:"peerGroups,omitempty"`
 }
 
 // +kubebuilder:object:root=true

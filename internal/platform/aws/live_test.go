@@ -165,17 +165,6 @@ func TestAWSLive_DiscoverEndpoints(t *testing.T) {
 		}
 	}
 
-	step(t, "checking the AWS-shaped status fields are populated for status.aws")
-	if len(result.RouteServers) == 0 {
-		t.Error("expected status.aws.routeServers to be populated")
-	}
-	for _, rs := range result.RouteServers {
-		observed(t, "route server %s remoteASN=%d endpoints=%d", rs.RouteServerID, rs.RemoteASN, len(rs.Endpoints))
-		if rs.RemoteASN == 0 {
-			t.Errorf("route server %s has no remote ASN", rs.RouteServerID)
-		}
-	}
-
 	step(t, "checking discovery is stable, since group order names the generated FRRConfigurations")
 	second, err := p.DiscoverEndpoints(ctx)
 	if err != nil {

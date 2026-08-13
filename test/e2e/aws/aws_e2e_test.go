@@ -82,12 +82,15 @@ var _ = Describe("AWS E2E", Ordered, func() {
 				}, frrCfg)).To(Succeed(), "FRRConfiguration %d should exist", i)
 			}
 
-			By("verifying status.aws is populated")
+			By("verifying the discovered peering plan is reported in status")
 			cfgFresh := &networkingv1alpha1.CUDNBgpConfig{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: bgpConfig.Name}, cfgFresh)).To(Succeed())
-			Expect(cfgFresh.Status.AWS).NotTo(BeNil(), "status.aws should be populated")
-			Expect(cfgFresh.Status.AWS.RouteServers).NotTo(BeEmpty(),
-				"status.aws.routeServers should contain discovered route servers")
+			Expect(cfgFresh.Status.PeerGroups).NotTo(BeEmpty(),
+				"status.peerGroups should report the discovered peering plan")
+			for _, pg := range cfgFresh.Status.PeerGroups {
+				Expect(pg.Neighbors).NotTo(BeEmpty(),
+					"peer group %s should report the neighbours FRR was configured with", pg.Key)
+			}
 
 			By("verifying Route Server peers exist per AZ")
 			nodes, err := routerNodes(ctx)

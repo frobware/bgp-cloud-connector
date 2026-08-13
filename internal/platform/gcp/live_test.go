@@ -59,14 +59,7 @@ func TestLive_GetRouterTopology(t *testing.T) {
 		t.Errorf("names and addresses disagree: %d vs %d", len(topology.InterfaceNames), len(topology.InterfaceIPs))
 	}
 	for _, ip := range topology.InterfaceIPs {
-		if contains := func() bool {
-			for _, r := range ip {
-				if r == '/' {
-					return true
-				}
-			}
-			return false
-		}(); contains {
+		if strings.Contains(ip, "/") {
 			t.Errorf("interface address %q still carries a mask; FRR needs a bare address", ip)
 		}
 	}

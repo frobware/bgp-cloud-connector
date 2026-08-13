@@ -114,8 +114,10 @@ func (c *routeServerClient) ListPeerings(ctx context.Context) ([]Peering, error)
 }
 
 func (c *routeServerClient) CreatePeering(ctx context.Context, name, peerIP string, peerASN int64) error {
+	// The name is the path parameter; the body carries properties only. The
+	// rh-mobb implementation that has run against a real Route Server omits
+	// it here, and an unexercised field is not worth keeping on a guess.
 	conn := armnetwork.BgpConnection{
-		Name: &name,
 		Properties: &armnetwork.BgpConnectionProperties{
 			PeerIP:  &peerIP,
 			PeerAsn: &peerASN,

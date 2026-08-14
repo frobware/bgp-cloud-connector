@@ -21,11 +21,15 @@ limitations under the License.
 // ASN is its VirtualRouterAsn, which Azure fixes at 65515. The peers
 // themselves are VirtualHubBgpConnections, one per router node.
 //
-// Two things differ from the other clouds and both are visible in the peering
-// plan rather than behind a method. The hub is not on the node's link, so
-// every neighbour asks for eBGP multihop. And there is no per-node instance
-// attribute to set: AWS clears SourceDestCheck and GCP sets canIpForward,
-// where Azure needs neither, so ReconcileNodes here only reconciles peers.
+// One thing differs from the other clouds and it is visible in the peering
+// plan rather than behind a method: the hub is not on the node's link, so
+// every neighbour asks for eBGP multihop.
+//
+// The per-node work is the same concept as on the other two clouds even though
+// all three name it differently -- AWS clears SourceDestCheck, GCP sets
+// canIpForward, Azure sets enableIPForwarding on the node's network interface.
+// See nodes.go, which carries the polarity table and the reason the name is
+// misleading.
 package azure
 
 import (
@@ -74,8 +78,9 @@ type routeServerAPI interface {
 }
 
 type Platform struct {
-	cfg Config
-	rs  routeServerAPI
+	cfg  Config
+	rs   routeServerAPI
+	nics nicAPI
 }
 
 // New builds a platform against the real Azure API, verifying the credential
@@ -88,7 +93,13 @@ func New(ctx context.Context, cfg Config) (*Platform, error) {
 			Msg: fmt.Sprintf("Azure credential verification failed: %v", err),
 		}
 	}
-	p := &Platform{cfg: cfg, rs: client}
+	nics, err := newNICClient(cfg)
+	if err != nil {
+		return nil, &platform.CredentialError{
+			Msg: fmt.Sprintf("Azure credential verification failed: %v", err),
+		}
+	}
+	p := &Platform{cfg: cfg, rs: client, nics: nics}
 	if _, err := p.rs.GetTopology(ctx); err != nil {
 		return nil, &platform.CredentialError{
 			Msg: fmt.Sprintf("could not read Route Server %q in resource group %q: %v",
@@ -98,7 +109,7 @@ func New(ctx context.Context, cfg Config) (*Platform, error) {
 	return p, nil
 }
 
-// NewWithClient builds a platform against a supplied client, for tests.
-func NewWithClient(cfg Config, rs routeServerAPI) *Platform {
-	return &Platform{cfg: cfg, rs: rs}
+// NewWithClients builds a platform against supplied clients, for tests.
+func NewWithClients(cfg Config, rs routeServerAPI, nics nicAPI) *Platform {
+	return &Platform{cfg: cfg, rs: rs, nics: nics}
 }

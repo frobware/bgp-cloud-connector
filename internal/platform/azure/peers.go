@@ -114,14 +114,25 @@ func desiredPeerings(clusterID string, localASN int64, nodes []platform.RouterNo
 	return out
 }
 
-// ReconcileNodes brings the Route Server's peerings in line with the router
-// nodes.
+// ReconcileNodes makes the router nodes able to forward, then brings the Route
+// Server's peerings in line with them.
 //
-// Unlike AWS and GCP there is no per-node instance attribute to set: AWS
-// clears SourceDestCheck and GCP sets canIpForward, where Azure needs neither.
-// So this reconciles peerings and nothing else.
+// Forwarding first, and the order is deliberate. A peering is what makes Azure
+// program the node as a next hop for the pod network across the whole vnet, so
+// creating one before the node can forward advertises a black hole: every
+// other VM starts sending pod traffic to a NIC that discards it. Doing it the
+// other way round means the node is ready before anything is pointed at it.
+//
+// GCP orders its two the same way for a harder reason -- it refuses to build
+// the spoke at all while a member cannot forward. Azure does not refuse, which
+// makes getting the order right here a choice rather than something the cloud
+// enforces.
 func (p *Platform) ReconcileNodes(ctx context.Context, nodes []platform.RouterNode) error {
 	logger := log.FromContext(ctx)
+
+	if err := p.ensureNodesCanForward(ctx, nodes); err != nil {
+		return err
+	}
 
 	current, err := p.rs.ListPeerings(ctx)
 	if err != nil {

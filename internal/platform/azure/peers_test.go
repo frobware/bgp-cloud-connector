@@ -142,7 +142,7 @@ func TestIsOurPeering(t *testing.T) {
 
 func TestReconcileNodes_CreatesPeerings(t *testing.T) {
 	f := &fakeRouteServer{}
-	p := NewWithClient(testConfig(), f)
+	p := testPlatform(f)
 
 	err := p.ReconcileNodes(context.Background(), []platform.RouterNode{
 		routerNode("worker-a", "10.0.0.1"),
@@ -169,7 +169,7 @@ func TestReconcileNodes_NoWriteWhenUnchanged(t *testing.T) {
 	f := &fakeRouteServer{
 		peerings: desiredPeerings(testConfig().ClusterID, 65001, nodes),
 	}
-	p := NewWithClient(testConfig(), f)
+	p := testPlatform(f)
 
 	if err := p.ReconcileNodes(context.Background(), nodes); err != nil {
 		t.Fatalf("ReconcileNodes: %v", err)
@@ -185,7 +185,7 @@ func TestReconcileNodes_PrunesStale(t *testing.T) {
 			{Name: peeringName("cluster-abc", "10.0.0.9"), PeerIP: "10.0.0.9", PeerASN: 65001},
 		},
 	}
-	p := NewWithClient(testConfig(), f)
+	p := testPlatform(f)
 
 	if err := p.ReconcileNodes(context.Background(), []platform.RouterNode{routerNode("worker-a", "10.0.0.1")}); err != nil {
 		t.Fatalf("ReconcileNodes: %v", err)
@@ -205,7 +205,7 @@ func TestReconcileNodes_LeavesForeignPeeringsAlone(t *testing.T) {
 			{Name: "other-cluster-bgp-10-9-9-9", PeerIP: "10.9.9.9", PeerASN: 65002},
 		},
 	}
-	p := NewWithClient(testConfig(), f)
+	p := testPlatform(f)
 
 	if err := p.ReconcileNodes(context.Background(), []platform.RouterNode{routerNode("worker-a", "10.0.0.1")}); err != nil {
 		t.Fatalf("ReconcileNodes: %v", err)
@@ -219,7 +219,7 @@ func TestReconcileNodes_LeavesForeignPeeringsAlone(t *testing.T) {
 
 func TestReconcileNodes_SkipsNodeWithNoAddress(t *testing.T) {
 	f := &fakeRouteServer{}
-	p := NewWithClient(testConfig(), f)
+	p := testPlatform(f)
 
 	if err := p.ReconcileNodes(context.Background(), []platform.RouterNode{
 		routerNode("worker-a", "10.0.0.1"),
@@ -239,7 +239,7 @@ func TestCleanup_DeletesOnlyOurs(t *testing.T) {
 			{Name: "other-cluster-bgp-10-9-9-9", PeerIP: "10.9.9.9", PeerASN: 65002},
 		},
 	}
-	p := NewWithClient(testConfig(), f)
+	p := testPlatform(f)
 
 	if err := p.Cleanup(context.Background()); err != nil {
 		t.Fatalf("Cleanup: %v", err)
@@ -250,7 +250,7 @@ func TestCleanup_DeletesOnlyOurs(t *testing.T) {
 }
 
 func TestCheckPrerequisites_Satisfied(t *testing.T) {
-	p := NewWithClient(testConfig(), &fakeRouteServer{
+	p := testPlatform(&fakeRouteServer{
 		topology: &RouteServerTopology{ASN: 65515, Addresses: []string{"10.0.1.4", "10.0.1.5"}},
 	})
 
@@ -264,7 +264,7 @@ func TestCheckPrerequisites_Satisfied(t *testing.T) {
 }
 
 func TestCheckPrerequisites_ReportsWithRemedy(t *testing.T) {
-	p := NewWithClient(testConfig(), &fakeRouteServer{
+	p := testPlatform(&fakeRouteServer{
 		topology: &RouteServerTopology{},
 	})
 

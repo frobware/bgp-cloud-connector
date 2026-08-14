@@ -388,6 +388,55 @@ spec:
                   - key
                   type: object
                 type: array
+              peers:
+                description: |-
+                  Peers is what the cloud says about the peerings this operator owns.
+                  Reported, never acted on: a session that will not establish is not
+                  something the operator can fix by writing the peering again, and the
+                  alternative to reporting it is three different cloud consoles.
+                items:
+                  description: |-
+                    PeerStatus is one cloud-side peering as the cloud reports it, which is the
+                    only part of this status that is not the operator quoting its own intent
+                    back. status.peerGroups says what was discovered and what FRR was told to
+                    do; both can be perfect while no session exists.
+                  properties:
+                    address:
+                      description: Address is the node address the cloud peers with.
+                      type: string
+                    asn:
+                      description: |-
+                        ASN is the ASN the cloud expects the node to speak, which is
+                        spec.bgp.localASN. Reported because a session that will not come up
+                        after someone edited it in the console is otherwise indistinguishable
+                        from one that was never configured.
+                      format: int64
+                      type: integer
+                    name:
+                      description: Name is the cloud's own name for the peering resource.
+                      type: string
+                    node:
+                      description: |-
+                        Node is the router node the peering is for, where the cloud records
+                        enough to say so. Absent rather than guessed: an Azure BGP connection,
+                        for one, records an address and nothing about whose it is.
+                      type: string
+                    sessionState:
+                      description: |-
+                        SessionState is the cloud's view of the BGP session, which is the half
+                        that answers whether it is up.
+                      type: string
+                    state:
+                      description: |-
+                        State is the cloud's view of the peering resource: whether it finished
+                        being created. Empty on GCP, where a Cloud Router peer is a field
+                        inside the router and has no lifecycle of its own.
+                      type: string
+                  required:
+                  - address
+                  - name
+                  type: object
+                type: array
               phase:
                 enum:
                 - Pending

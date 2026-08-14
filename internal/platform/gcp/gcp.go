@@ -58,6 +58,42 @@ func NewWithClients(cfg Config, computeClient ComputeClient, nccClient NCCClient
 	return &Platform{cfg: cfg, compute: computeClient, ncc: nccClient}
 }
 
+// ObservePeers reports this cluster's Cloud Router sessions as GCP sees them.
+//
+// Only the session state is filled in. A Cloud Router peer is a field inside
+// the router rather than a resource with a lifecycle of its own, so there is
+// no provisioning state to report beside it -- the same fact that makes the
+// name prefix the only ownership signal available here.
+//
+// The ASN is this cluster's LocalASN rather than something read back:
+// GetRouterStatus reports the session, not the configuration it was built
+// from, and reporting the ASN we asked for next to a session that did not
+// establish is exactly the comparison worth having.
+//
+// Filtered by the ownership prefix, so a Cloud Router shared with another
+// cluster keeps its sessions out of this operator's status, just as
+// mergePeers keeps them out of its reconcile.
+func (p *Platform) ObservePeers(ctx context.Context) ([]platform.ObservedPeer, error) {
+	statuses, err := p.compute.GetPeerStatus(ctx, p.cfg.CloudRouterName)
+	if err != nil {
+		return nil, fmt.Errorf("reading Cloud Router %q BGP status: %w", p.cfg.CloudRouterName, err)
+	}
+
+	out := make([]platform.ObservedPeer, 0, len(statuses))
+	for _, s := range statuses {
+		if !isOurPeer(s.Name, p.cfg.ClusterID) {
+			continue
+		}
+		out = append(out, platform.ObservedPeer{
+			Name:         s.Name,
+			Address:      s.PeerIP,
+			ASN:          p.cfg.LocalASN,
+			SessionState: s.State,
+		})
+	}
+	return out, nil
+}
+
 // DiscoverEndpoints reads the Cloud Router and returns a single peer group.
 //
 // Every router node peers with the same Cloud Router interface addresses, so

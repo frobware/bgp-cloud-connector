@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -82,6 +83,49 @@ func (p *Platform) reconcileRouteServerPeers(ctx context.Context, nodes []platfo
 	}
 
 	return nil
+}
+
+// ObservePeers reports the route server peers this operator owns as EC2 sees
+// them.
+//
+// AWS splits the answer the same way Azure does, and for the same reason.
+// State describes the peer resource: whether it finished being created.
+// BgpStatus.Status describes the session running on it. A peer that is
+// available with its BGP status down is a resource EC2 built exactly as asked,
+// carrying a session that never came up.
+//
+// Only managed peers, by the same tag reconcile uses. A route server endpoint
+// shared with something else keeps its peers out of this operator's status as
+// well as out of its reconcile.
+func (p *Platform) ObservePeers(ctx context.Context) ([]platform.ObservedPeer, error) {
+	var out []platform.ObservedPeer
+
+	for _, endpointIDs := range p.endpointsByAZ {
+		for _, endpointID := range endpointIDs {
+			peers, err := p.listManagedPeers(ctx, endpointID)
+			if err != nil {
+				return nil, fmt.Errorf("listing managed peers for endpoint %s: %w", endpointID, err)
+			}
+			for _, peer := range peers {
+				observed := platform.ObservedPeer{
+					Name:    aws.ToString(peer.RouteServerPeerId),
+					Address: aws.ToString(peer.PeerAddress),
+					State:   string(peer.State),
+				}
+				if peer.BgpOptions != nil && peer.BgpOptions.PeerAsn != nil {
+					observed.ASN = *peer.BgpOptions.PeerAsn
+				}
+				if peer.BgpStatus != nil {
+					observed.SessionState = string(peer.BgpStatus.Status)
+				}
+				out = append(out, observed)
+			}
+		}
+	}
+
+	// endpointsByAZ is a map, so the walk above has no order of its own.
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }
 
 func (p *Platform) listManagedPeers(ctx context.Context, endpointID string) ([]ec2types.RouteServerPeer, error) {

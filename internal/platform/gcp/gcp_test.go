@@ -25,6 +25,9 @@ type fakeCompute struct {
 
 	bgpFirewall bool
 	firewallErr error
+
+	peerStatus    []PeerStatus
+	peerStatusErr error
 }
 
 func (f *fakeCompute) EnsureCanIPForward(_ context.Context, node RouterNode) (bool, error) {
@@ -58,6 +61,10 @@ func (f *fakeCompute) ClearPeers(_ context.Context, _, _ string) (bool, error) {
 
 func (f *fakeCompute) HasBGPFirewallRule(_ context.Context, _ []string) (bool, error) {
 	return f.bgpFirewall, f.firewallErr
+}
+
+func (f *fakeCompute) GetPeerStatus(_ context.Context, _ string) ([]PeerStatus, error) {
+	return f.peerStatus, f.peerStatusErr
 }
 
 type fakeNCC struct {

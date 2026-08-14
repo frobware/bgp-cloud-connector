@@ -199,6 +199,9 @@ type mockPlatform struct {
 	prerequisitesCalled  bool
 	unmetPrerequisites   []string
 	prerequisitesErr     error
+	observePeersCalled   bool
+	observedPeers        []platform.ObservedPeer
+	observePeersErr      error
 }
 
 func (m *mockPlatform) DiscoverEndpoints(_ context.Context) (*platform.DiscoveryResult, error) {
@@ -229,6 +232,11 @@ func (m *mockPlatform) ReconcileNodes(_ context.Context, nodes []platform.Router
 func (m *mockPlatform) CheckPrerequisites(_ context.Context) ([]string, error) {
 	m.prerequisitesCalled = true
 	return m.unmetPrerequisites, m.prerequisitesErr
+}
+
+func (m *mockPlatform) ObservePeers(_ context.Context) ([]platform.ObservedPeer, error) {
+	m.observePeersCalled = true
+	return m.observedPeers, m.observePeersErr
 }
 
 func (m *mockPlatform) Cleanup(_ context.Context) error {

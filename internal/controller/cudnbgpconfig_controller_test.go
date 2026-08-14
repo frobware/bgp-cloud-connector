@@ -128,8 +128,11 @@ func TestConfigReconcile_FullReconcile(t *testing.T) {
 		t.Errorf("expected phase Ready, got %s", updated.Status.Phase)
 	}
 
-	if len(updated.Status.Conditions) != 3 {
-		t.Errorf("expected 3 conditions, got %d", len(updated.Status.Conditions))
+	// Three from the phases this fixture runs, plus Suspended, which is
+	// reported on every pass because absence of a condition reads as Unknown
+	// rather than as False.
+	if len(updated.Status.Conditions) != 4 {
+		t.Errorf("expected 4 conditions, got %d", len(updated.Status.Conditions))
 	}
 
 	// Verify FRRConfiguration was created
@@ -352,8 +355,17 @@ func TestConfigReconcile_AWSFullReconcile(t *testing.T) {
 			t.Errorf("condition %s = %s, want True", want, status)
 		}
 	}
-	if len(gotConditions) != len(wantConditions) {
-		t.Errorf("expected conditions %v, got %v", wantConditions, gotConditions)
+	// Suspended is reported alongside them, False while running. It is not in
+	// wantConditions because those are asserted True; this one is the opposite
+	// polarity and has to be said rather than left out, since an absent
+	// condition reads as Unknown.
+	if status, present := gotConditions[networkingv1alpha1.ConditionSuspended]; !present {
+		t.Errorf("missing condition %s", networkingv1alpha1.ConditionSuspended)
+	} else if status != metav1.ConditionFalse {
+		t.Errorf("condition %s = %s, want False", networkingv1alpha1.ConditionSuspended, status)
+	}
+	if len(gotConditions) != len(wantConditions)+1 {
+		t.Errorf("expected conditions %v plus Suspended, got %v", wantConditions, gotConditions)
 	}
 	// The discovered peering plan is reported for every cloud, not just the
 	// one whose vocabulary the status block used to be written in.

@@ -73,6 +73,63 @@ func (r *CUDNBgpConfigReconciler) patchConfigStatus(
 // moved, is what keeps the five minute resync from republishing the same set
 // forever and burying the transition that mattered.
 //
+// negativePolarityConditions are the conditions this controller reports whose
+// normal state is False. Every other condition it reports is normal when True.
+//
+// The polarity cannot be derived from the condition itself, and the API
+// conventions say so: for some conditions True represents normal operation and
+// for some False does, and without further knowledge of the conditions it is
+// not possible to compute a generic summary. That knowledge is here because
+// there is nowhere else it can be.
+var negativePolarityConditions = map[string]struct{}{
+	networkingv1alpha1.ConditionSuspended: {},
+	ConditionDeletionBlocked:              {},
+}
+
+// deletionBlockedMessage explains why a delete is not proceeding, and what to
+// do about it.
+//
+// The person reading this is by definition looking at a delete that appears to
+// have hung with no other explanation, so the message carries the command that
+// unblocks it rather than only the names.
+//
+// The names appear once, space separated inside that command, so the whole
+// thing can be pasted into a shell. Listing them again comma separated would
+// be the same information in a form nobody can use.
+//
+// Sorted, because the list comes from a List call whose order is not
+// guaranteed: an unsorted message would differ between reconciles and re-emit
+// an event every ten seconds for a condition that has not changed.
+func deletionBlockedMessage(names []string) string {
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted)
+	return fmt.Sprintf(
+		"%d CUDNBgpRouting CR(s) must be deleted first. To proceed: oc delete cudnbgprouting %s",
+		len(sorted), strings.Join(sorted, " "))
+}
+
+// conditionEventType decides whether a condition's new state is news or a
+// problem.
+//
+// Unknown is neither. It says the controller is not currently observing the
+// thing, which is what suspending deliberately leaves behind, and a screenful
+// of warnings is the wrong answer to somebody asking for the operator to stop.
+// A genuine failure sets the condition False with a reason, and that still
+// warns.
+func conditionEventType(cond metav1.Condition) string {
+	if cond.Status == metav1.ConditionUnknown {
+		return corev1.EventTypeNormal
+	}
+	normal := metav1.ConditionTrue
+	if _, negative := negativePolarityConditions[cond.Type]; negative {
+		normal = metav1.ConditionFalse
+	}
+	if cond.Status == normal {
+		return corev1.EventTypeNormal
+	}
+	return corev1.EventTypeWarning
+}
+
 // A nil recorder is tolerated so a unit test that does not care about events
 // need not supply one.
 func emitConditionEvents(
@@ -95,11 +152,7 @@ func emitConditionEvents(
 		if old != nil && old.Status == cond.Status && old.Reason == cond.Reason && old.Message == cond.Message {
 			continue
 		}
-		eventType := corev1.EventTypeNormal
-		if cond.Status != metav1.ConditionTrue {
-			eventType = corev1.EventTypeWarning
-		}
-		recorder.Eventf(object, eventType, cond.Reason, "%s: %s", cond.Type, cond.Message)
+		recorder.Eventf(object, conditionEventType(cond), cond.Reason, "%s: %s", cond.Type, cond.Message)
 	}
 }
 
@@ -137,10 +190,7 @@ func (r *CUDNBgpConfigReconciler) reportDeletionBlocked(
 	for i := range routings {
 		names[i] = routings[i].Name
 	}
-	sort.Strings(names)
-
-	condMessage := fmt.Sprintf("%d CUDNBgpRouting CR(s) must be deleted first: %s",
-		len(names), strings.Join(names, ", "))
+	condMessage := deletionBlockedMessage(names)
 
 	return r.patchConfigStatus(ctx, config, baselineStatus, func(c *networkingv1alpha1.CUDNBgpConfig) {
 		meta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{

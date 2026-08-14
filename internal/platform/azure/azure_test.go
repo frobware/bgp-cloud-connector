@@ -62,11 +62,31 @@ func testConfig() Config {
 	}
 }
 
+// testPlatform builds a Platform with both fakes. The router nodes' interfaces
+// already permit forwarding, so a peering test exercises the peering path and
+// nothing else; nodes_test.go drives the per-node path on its own.
+func testPlatform(rs routeServerAPI) *Platform {
+	return &Platform{cfg: testConfig(), rs: rs, nics: testNICs()}
+}
+
+func testNICs() *fakeNICs {
+	var nics []NIC
+	for _, name := range []string{"worker-a", "worker-b", "worker-c"} {
+		nics = append(nics, NIC{
+			Name:          name + "-nic",
+			ResourceGroup: "rg-1",
+			VMID:          "/subscriptions/sub-1/resourceGroups/rg-1/providers/Microsoft.Compute/virtualMachines/" + name,
+			IPForwarding:  true,
+		})
+	}
+	return &fakeNICs{nics: nics}
+}
+
 // TestDiscoverEndpoints_SingleGroup pins that Azure yields one peer group for
 // every router node rather than one per zone. The Route Server is regional and
 // every node peers with the same pair of addresses.
 func TestDiscoverEndpoints_SingleGroup(t *testing.T) {
-	p := NewWithClient(testConfig(), &fakeRouteServer{
+	p := testPlatform(&fakeRouteServer{
 		topology: &RouteServerTopology{ASN: 65515, Addresses: []string{"10.0.1.4", "10.0.1.5"}},
 	})
 
@@ -95,7 +115,7 @@ func TestDiscoverEndpoints_SingleGroup(t *testing.T) {
 // neither other cloud does. The Route Server is not on the node's link, so
 // without ebgpMultiHop the session never establishes.
 func TestDiscoverEndpoints_RequestsMultiHop(t *testing.T) {
-	p := NewWithClient(testConfig(), &fakeRouteServer{
+	p := testPlatform(&fakeRouteServer{
 		topology: &RouteServerTopology{ASN: 65515, Addresses: []string{"10.0.1.4", "10.0.1.5"}},
 	})
 
@@ -114,7 +134,7 @@ func TestDiscoverEndpoints_RequestsMultiHop(t *testing.T) {
 // The raw escape hatch is for directives frr-k8s cannot express, and Azure's
 // requirement is a structured field.
 func TestDiscoverEndpoints_NoRawConfig(t *testing.T) {
-	p := NewWithClient(testConfig(), &fakeRouteServer{
+	p := testPlatform(&fakeRouteServer{
 		topology: &RouteServerTopology{ASN: 65515, Addresses: []string{"10.0.1.4"}},
 	})
 
@@ -131,7 +151,7 @@ func TestDiscoverEndpoints_NoRawConfig(t *testing.T) {
 // peer with, rather than returning an empty plan that would silently generate
 // an FRRConfiguration with no neighbours.
 func TestDiscoverEndpoints_NoAddresses(t *testing.T) {
-	p := NewWithClient(testConfig(), &fakeRouteServer{
+	p := testPlatform(&fakeRouteServer{
 		topology: &RouteServerTopology{ASN: 65515},
 	})
 
@@ -148,7 +168,7 @@ func TestDiscoverEndpoints_NoAddresses(t *testing.T) {
 // the Azure counterpart of GCP's guard against the installer's Cloud NAT
 // router.
 func TestDiscoverEndpoints_NoASN(t *testing.T) {
-	p := NewWithClient(testConfig(), &fakeRouteServer{
+	p := testPlatform(&fakeRouteServer{
 		topology: &RouteServerTopology{Addresses: []string{"10.0.1.4"}},
 	})
 
@@ -162,7 +182,7 @@ func TestDiscoverEndpoints_NoASN(t *testing.T) {
 }
 
 func TestDiscoverEndpoints_TopologyError(t *testing.T) {
-	p := NewWithClient(testConfig(), &fakeRouteServer{
+	p := testPlatform(&fakeRouteServer{
 		topologyErr: errors.New("boom"),
 	})
 

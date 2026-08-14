@@ -118,6 +118,19 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	config.Status.Phase = networkingv1alpha1.PhaseConfiguring
 	config.Status.ObservedGeneration = config.Generation
 
+	// Said explicitly on every pass rather than only when suspending. Absence
+	// of a condition reads as Unknown, not False, so a controller cannot
+	// signal "not suspended" by leaving the condition out -- and a resumed
+	// config that keeps its last Suspended=True claims to be paused while it
+	// reconciles.
+	meta.SetStatusCondition(&config.Status.Conditions, metav1.Condition{
+		Type:               networkingv1alpha1.ConditionSuspended,
+		Status:             metav1.ConditionFalse,
+		Reason:             "NotSuspended",
+		Message:            "spec.suspended is not set: reconciling normally",
+		ObservedGeneration: config.Generation,
+	})
+
 	// Phase 1: Patch Network Operator
 	log.Info("Phase 1: patching Network operator")
 	if err := PatchNetworkOperator(ctx, r.Client); err != nil {
@@ -745,8 +758,29 @@ func (r *CUDNBgpConfigReconciler) reconcileSuspended(
 		c.Status.Phase = networkingv1alpha1.PhaseSuspended
 		c.Status.ObservedGeneration = c.Generation
 		c.Status.PeerGroups = nil
+		// Peers goes for the same reason and more sharply: it is the one field
+		// read back from the cloud, so a stale copy is a snapshot of sessions
+		// nobody is maintaining any more, presented as current.
 		c.Status.Peers = nil
-		c.Status.Conditions = nil
+		// The phases that no longer run have nothing to say, but they are not
+		// deleted: a controller applies its conditions so that other components
+		// know they exist, and absence of a condition reads as Unknown rather
+		// than as False. Leaving the last verdict behind would report a healthy
+		// stack that is not running; removing it would report no opinion where
+		// there is one. Unknown says what is true -- suspended, the cloud and
+		// FRR are not being observed at all.
+		for i := range c.Status.Conditions {
+			if c.Status.Conditions[i].Type == networkingv1alpha1.ConditionSuspended {
+				continue
+			}
+			meta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
+				Type:               c.Status.Conditions[i].Type,
+				Status:             metav1.ConditionUnknown,
+				Reason:             "Suspended",
+				Message:            "not observed while spec.suspended is set",
+				ObservedGeneration: c.Generation,
+			})
+		}
 		meta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
 			Type:               networkingv1alpha1.ConditionSuspended,
 			Status:             metav1.ConditionTrue,

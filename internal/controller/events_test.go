@@ -206,3 +206,90 @@ func TestEvents_SilentWhenIdentical(t *testing.T) {
 		t.Errorf("expected silence, got %v", events)
 	}
 }
+
+// TestEvents_PolarityDecidesTheEventType covers which conditions are bad news.
+//
+// Event type cannot be derived from the status alone. The API conventions are
+// explicit that True means normal operation for some conditions and False for
+// others, so a blanket "True is Normal, anything else is a Warning" reports a
+// healthy resource as a problem and a deliberate suspension as routine --
+// exactly backwards on both.
+func TestEvents_PolarityDecidesTheEventType(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		condType string
+		status   metav1.ConditionStatus
+		reason   string
+		wantWarn bool
+	}{
+		{"positive polarity, healthy", networkingv1alpha1.ConditionCloudResourcesReconciled, metav1.ConditionTrue, "Reconciled", false},
+		{"positive polarity, failed", networkingv1alpha1.ConditionCloudResourcesReconciled, metav1.ConditionFalse, "CloudReconcileFailed", true},
+		{"negative polarity, healthy", networkingv1alpha1.ConditionSuspended, metav1.ConditionFalse, "NotSuspended", false},
+		{"negative polarity, suspended", networkingv1alpha1.ConditionSuspended, metav1.ConditionTrue, "Suspended", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := record.NewFakeRecorder(8)
+			after := []metav1.Condition{{
+				Type: tc.condType, Status: tc.status, Reason: tc.reason, Message: "m",
+			}}
+
+			emitConditionEvents(rec, &networkingv1alpha1.CUDNBgpConfig{}, nil, after)
+
+			events := drain(rec)
+			if len(events) != 1 {
+				t.Fatalf("expected one event, got %v", events)
+			}
+			gotWarn := strings.HasPrefix(events[0], "Warning")
+			if gotWarn != tc.wantWarn {
+				t.Errorf("event = %q, wantWarning=%v", events[0], tc.wantWarn)
+			}
+		})
+	}
+}
+
+// TestEvents_UnknownIsNotAWarning covers the state a suspended config leaves
+// its operational conditions in. Unknown says the controller is not observing
+// the thing, which is an absence of information rather than a fault, and a
+// deliberate suspension should not produce a screenful of warnings.
+func TestEvents_UnknownIsNotAWarning(t *testing.T) {
+	rec := record.NewFakeRecorder(8)
+	after := []metav1.Condition{{
+		Type:    networkingv1alpha1.ConditionCloudResourcesReconciled,
+		Status:  metav1.ConditionUnknown,
+		Reason:  "Suspended",
+		Message: "not observed while spec.suspended is set",
+	}}
+
+	emitConditionEvents(rec, &networkingv1alpha1.CUDNBgpConfig{}, nil, after)
+
+	events := drain(rec)
+	if len(events) != 1 {
+		t.Fatalf("expected one event, got %v", events)
+	}
+	if strings.HasPrefix(events[0], "Warning") {
+		t.Errorf("Unknown reported as a Warning: %q", events[0])
+	}
+}
+
+// TestEvents_DeletionBlockedIsAWarning covers the other negative-polarity
+// condition. A delete that cannot proceed is not routine, and reporting it as
+// Normal buries the one event that explains why nothing is happening.
+func TestEvents_DeletionBlockedIsAWarning(t *testing.T) {
+	rec := record.NewFakeRecorder(8)
+	after := []metav1.Condition{{
+		Type:    ConditionDeletionBlocked,
+		Status:  metav1.ConditionTrue,
+		Reason:  "RoutingCRsExist",
+		Message: "m",
+	}}
+
+	emitConditionEvents(rec, &networkingv1alpha1.CUDNBgpConfig{}, nil, after)
+
+	events := drain(rec)
+	if len(events) != 1 {
+		t.Fatalf("expected one event, got %v", events)
+	}
+	if !strings.HasPrefix(events[0], "Warning") {
+		t.Errorf("a blocked deletion reported as %q, want a Warning", events[0])
+	}
+}

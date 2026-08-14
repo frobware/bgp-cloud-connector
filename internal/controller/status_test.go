@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -162,5 +163,27 @@ func TestPatchRoutingStatus_SkipsUnchangedPending(t *testing.T) {
 	}
 	if after.ResourceVersion != before.ResourceVersion {
 		t.Fatalf("expected no status update, resourceVersion changed from %q to %q", before.ResourceVersion, after.ResourceVersion)
+	}
+}
+
+// TestDeletionBlocked_MessageSaysHowToUnblock covers the message a user
+// actually sees. Naming the offending CRs says what is wrong; it does not say
+// what to do about it, and the person reading it is by definition looking at a
+// delete that appears to have hung.
+func TestDeletionBlocked_MessageSaysHowToUnblock(t *testing.T) {
+	msg := deletionBlockedMessage([]string{"prod2", "prod"})
+
+	// The command has to be pasteable, so the names are space separated
+	// inside it and appear nowhere else.
+	if !strings.Contains(msg, "oc delete cudnbgprouting prod prod2") {
+		t.Errorf("message %q does not carry a runnable command", msg)
+	}
+	if strings.Contains(msg, ",") {
+		t.Errorf("message %q joins names with a comma; that cannot be pasted", msg)
+	}
+	// Sorted, so the message does not churn between reconciles and re-emit
+	// an event every pass on a List-ordered slice.
+	if deletionBlockedMessage([]string{"b", "a"}) != deletionBlockedMessage([]string{"a", "b"}) {
+		t.Error("message depends on input order; it will churn between reconciles")
 	}
 }

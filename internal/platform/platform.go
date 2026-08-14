@@ -51,10 +51,45 @@ type DiscoveryResult struct {
 	PeerGroups []PeerGroup
 }
 
+// ObservedPeer is one peering as the cloud reports it now, rather than as the
+// operator asked for it. Everything else here describes intent: what was
+// discovered, and what FRR was told to do. Without this the operator can say
+// it wrote a peering and cannot say whether the session ever came up, so the
+// only answer to "why is nothing routing" lives outside the cluster, in three
+// different cloud consoles.
+//
+// Every cloud can fill this in, which is the bar a shared type has to clear
+// here -- DiscoveryResult carries nothing cloud-specific for exactly the
+// reason given above it. AWS route server peers carry a state and a BGP
+// status, GCP reports bgpPeerStatus on the Cloud Router, and an Azure BGP
+// connection carries a provisioning state and a connection state.
+type ObservedPeer struct {
+	// Name is the cloud's own name for the peering resource.
+	Name string
+	// Node is the router node the peering is for, where the cloud records
+	// enough to say so. Left empty rather than guessed.
+	Node string
+	// Address is the node address the cloud peers with.
+	Address string
+	ASN     int64
+	// State is the cloud's view of the peering resource itself: whether it
+	// finished being created. A peering can be perfectly provisioned and
+	// still carry no session, which is why this is not the whole answer.
+	State string
+	// SessionState is the cloud's view of the BGP session on that peering,
+	// which is the half that answers "is it up".
+	SessionState string
+}
+
 type CloudPlatform interface {
 	DiscoverEndpoints(ctx context.Context) (*DiscoveryResult, error)
 	ReconcileNodes(ctx context.Context, nodes []RouterNode) error
 	Cleanup(ctx context.Context) error
+	// ObservePeers reports the peerings this operator owns as the cloud sees
+	// them. Read-only, and reported rather than acted on: a session that will
+	// not establish is not something the operator can fix by writing the
+	// peering again, so this exists to be looked at, not reconciled against.
+	ObservePeers(ctx context.Context) ([]ObservedPeer, error)
 	// CheckPrerequisites reports cloud configuration this operator relies on
 	// but deliberately does not create, returning one human-readable line per
 	// unmet requirement and an empty slice when everything is in place.

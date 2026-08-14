@@ -104,6 +104,39 @@ func (c *computeClient) GetRouterTopology(ctx context.Context, routerName string
 	return topology, nil
 }
 
+// GetPeerStatus reads the live BGP session state for a Cloud Router.
+//
+// Not from Routers.Get, which is what everything else here uses: that returns
+// the router's configuration, in which a peer that is configured perfectly and
+// has never established looks identical to a working one. The session state is
+// on GetRouterStatus instead, which is also where gcloud's
+// `compute routers get-status` reads it from.
+func (c *computeClient) GetPeerStatus(ctx context.Context, routerName string) ([]PeerStatus, error) {
+	resp, err := c.svc.Routers.GetRouterStatus(c.project, c.region, routerName).Context(ctx).Do()
+	if err != nil {
+		return nil, err
+	}
+	// A router with no peers returns a result with an empty list rather than
+	// no result, but a nil result is cheap to guard and not worth a panic.
+	if resp == nil || resp.Result == nil {
+		return nil, nil
+	}
+
+	out := make([]PeerStatus, 0, len(resp.Result.BgpPeerStatus))
+	for _, s := range resp.Result.BgpPeerStatus {
+		if s == nil {
+			continue
+		}
+		out = append(out, PeerStatus{
+			Name:   s.Name,
+			PeerIP: s.PeerIpAddress,
+			State:  s.State,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
 func (c *computeClient) ReconcilePeers(ctx context.Context, routerName, clusterID string, nodes []RouterNode, topology *CloudRouterTopology, localASN int64) (bool, error) {
 	r, err := c.svc.Routers.Get(c.project, c.region, routerName).Context(ctx).Do()
 	if err != nil {

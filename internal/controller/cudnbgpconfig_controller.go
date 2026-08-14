@@ -311,6 +311,23 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			Message:            fmt.Sprintf("Reconciled cloud resources for %d router node(s)", len(nodes)),
 			ObservedGeneration: config.Generation,
 		})
+
+		// Read the peerings back. This runs after the reconcile above and
+		// reports rather than acts: it is the only thing in this status that
+		// is not the operator quoting its own intent back, and it is what
+		// answers "the operator says it did the work, so why is nothing
+		// routing" without sending anybody to a cloud console.
+		//
+		// A failure here does not fail the reconcile. The peerings were
+		// written; not being able to read them back afterwards leaves the
+		// cluster working and the status thinner, which is not worth
+		// degrading over.
+		observed, err := cloud.ObservePeers(ctx)
+		if err != nil {
+			log.Info("could not read cloud peerings back for status", "error", err)
+		} else {
+			config.Status.Peers = observedPeersToStatus(observed)
+		}
 	}
 
 	// Everything the operator owns is reconciled. Ready is still withheld
@@ -349,6 +366,24 @@ func peerGroupsToStatus(groups []platform.PeerGroup) []networkingv1alpha1.PeerGr
 			})
 		}
 		out = append(out, pg)
+	}
+	return out
+}
+
+func observedPeersToStatus(peers []platform.ObservedPeer) []networkingv1alpha1.PeerStatus {
+	if len(peers) == 0 {
+		return nil
+	}
+	out := make([]networkingv1alpha1.PeerStatus, 0, len(peers))
+	for _, p := range peers {
+		out = append(out, networkingv1alpha1.PeerStatus{
+			Name:         p.Name,
+			Node:         p.Node,
+			Address:      p.Address,
+			ASN:          p.ASN,
+			State:        p.State,
+			SessionState: p.SessionState,
+		})
 	}
 	return out
 }
@@ -710,8 +745,7 @@ func (r *CUDNBgpConfigReconciler) reconcileSuspended(
 		c.Status.Phase = networkingv1alpha1.PhaseSuspended
 		c.Status.ObservedGeneration = c.Generation
 		c.Status.PeerGroups = nil
-		// The phases that no longer ran have nothing to say, and leaving their
-		// last verdict behind would report a healthy stack that is not running.
+		c.Status.Peers = nil
 		c.Status.Conditions = nil
 		meta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
 			Type:               networkingv1alpha1.ConditionSuspended,

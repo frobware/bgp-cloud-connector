@@ -189,6 +189,53 @@ func (p *Platform) ReconcileNodes(ctx context.Context, nodes []platform.RouterNo
 	return nil
 }
 
+// ObservePeers reports this cluster's peerings as the Route Server sees them.
+//
+// ProvisioningState is the useful half and says whether the peering finished
+// being created. ConnectionState is read too, and on Route Server it comes
+// back empty even when the session is up.
+//
+// That is not a mapping error. Azure declares the field READ-ONLY as "the
+// current state of the VirtualHub to Peer" over a Connected/Connecting/
+// NotConnected/Unknown enum, and returns the property absent rather than
+// Unknown, for a live session and for one that can never establish alike.
+// BgpConnectionProperties also carries HubVirtualNetworkConnection, which only
+// means anything for a Virtual WAN hub, so the state machinery appears wired
+// for that case and not for Route Server.
+//
+// It is read rather than dropped: the field is Azure's to populate, it costs
+// nothing while empty, and SessionState is omitempty so an empty one never
+// reaches status. Session state on Azure is available from the cluster, in
+// bgpsessionstates, and from the BgpPeerStatus metric in Azure Monitor.
+//
+// Filtered to ours for the same reason ReconcileNodes prunes only ours: a
+// Route Server shared with another cluster is not this operator's to report
+// on.
+func (p *Platform) ObservePeers(ctx context.Context) ([]platform.ObservedPeer, error) {
+	current, err := p.rs.ListPeerings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing Route Server peerings: %w", err)
+	}
+
+	out := make([]platform.ObservedPeer, 0, len(current))
+	for _, c := range current {
+		if !isOurPeering(c.Name, p.cfg.ClusterID) {
+			continue
+		}
+		// Node is left empty: an Azure BGP connection records the address it
+		// peers with and nothing about whose address it is.
+		out = append(out, platform.ObservedPeer{
+			Name:         c.Name,
+			Address:      c.PeerIP,
+			ASN:          c.PeerASN,
+			State:        c.ProvisioningState,
+			SessionState: c.ConnectionState,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
 // Cleanup removes the peerings this operator created and leaves every other
 // peering alone, so tearing down one cluster does not disconnect another that
 // shares the Route Server.

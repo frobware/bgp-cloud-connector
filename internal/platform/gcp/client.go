@@ -31,6 +31,24 @@ type ComputeClient interface {
 	// HasBGPFirewallRule reports whether an enabled ingress rule admits TCP
 	// 179 from the given Cloud Router interface addresses.
 	HasBGPFirewallRule(ctx context.Context, interfaceIPs []string) (bool, error)
+	// GetPeerStatus reads the live BGP session state for a Cloud Router.
+	GetPeerStatus(ctx context.Context, routerName string) ([]PeerStatus, error)
+}
+
+// PeerStatus is one Cloud Router BGP session as GCP reports it.
+//
+// There is no resource state here to go with the session state, and that is
+// GCP's shape rather than an omission: a Cloud Router peer is a field inside
+// the router resource, not a resource with a lifecycle of its own, so the
+// only thing to observe is the session.
+type PeerStatus struct {
+	Name string
+	// PeerIP is the node address the session is with.
+	PeerIP string
+	// State is the BGP state machine's state -- Established, Connect, Active
+	// and so on. GCP also reports a Status of UP or DOWN, which is derived
+	// from this and adds nothing, so it is not carried separately.
+	State string
 }
 
 // NCCClient abstracts Network Connectivity Center spoke operations.

@@ -16,7 +16,9 @@ package gcp
 
 import (
 	"context"
+	"maps"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/go-logr/logr/funcr"
@@ -163,7 +165,38 @@ func TestGCPLive_ReconcileNodes(t *testing.T) {
 		t.Fatalf("topology: %v", err)
 	}
 	wantPeers := len(nodes) * len(topology.InterfaceNames)
-	t.Logf("expecting %d peers (%d nodes x %d interfaces)", wantPeers, len(nodes), len(topology.InterfaceNames))
+
+	step(t, "checking the router carries %d peers, %d nodes x %d interfaces",
+		wantPeers, len(nodes), len(topology.InterfaceNames))
+	statuses, err := computeClient.GetPeerStatus(ctx, cfg.CloudRouterName)
+	if err != nil {
+		t.Fatalf("GetPeerStatus: %v", err)
+	}
+	ours := map[string]bool{}
+	for _, s := range statuses {
+		if isOurPeer(s.Name, cfg.ClusterID) {
+			ours[s.Name] = true
+		}
+	}
+	observed(t, "%d of the router's %d peers carry our prefix", len(ours), len(statuses))
+	if len(ours) != wantPeers {
+		t.Errorf("expected %d peers, got %d: %v", wantPeers, len(ours), slices.Sorted(maps.Keys(ours)))
+	}
+
+	// Naming the expected peers rather than counting them is what catches
+	// renumbering: a positional scheme keeps the count right while moving
+	// every session onto a different node.
+	step(t, "checking each peer is named for the node and interface it belongs to")
+	for _, n := range nodes {
+		for i := range topology.InterfaceNames {
+			want := PeerName(cfg.ClusterID, n.PrivateIP, i)
+			if !ours[want] {
+				t.Errorf("no peer named %s, for node %s on interface %d", want, n.Name, i)
+				continue
+			}
+			observed(t, "%s -> %s", n.Name, want)
+		}
+	}
 
 	// A second pass must be a no-op, which is what stops the operator
 	// fighting itself every resync.

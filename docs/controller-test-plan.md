@@ -91,10 +91,10 @@ Tests the config controller's interaction with the generic `CloudPlatform` inter
 
 | ID | Test Case | Setup | Expected Result |
 |:---|:---|:---|:---|
-| UT-15 | Full reconcile with cloud (Phases 1-5) | spec.aws set with routeServerIDs, mock platform with discovery | AWSEndpointsDiscovered=True, FRRConfigurations created from discovered neighbors, ReconcileNodes called, AWSResourcesReconciled=True, phase=Ready with 5 conditions |
-| UT-16 | Phase 3 credential failure | Mock platform builder returns CredentialError | AWSEndpointsDiscovered=False, reason=AWSCredentialsInvalid, phase=Degraded |
-| UT-17 | Phase 3 discovery failure | Mock platform discovery returns error | AWSEndpointsDiscovered=False, reason=AWSDiscoveryFailed, phase=Degraded, requeue 30s |
-| UT-18 | Phase 5 failure | Mock platform ReconcileNodes returns error | AWSResourcesReconciled=False, reason=AWSReconcileFailed, phase=Degraded, requeue 30s |
+| UT-15 | Full reconcile with cloud (Phases 1-5) | spec.aws set with routeServerIDs, mock platform with discovery | CloudEndpointsDiscovered=True, FRRConfigurations created from discovered neighbors, ReconcileNodes called, CloudResourcesReconciled=True, phase=Ready with 5 conditions |
+| UT-16 | Phase 3 credential failure | Mock platform builder returns CredentialError | CloudEndpointsDiscovered=False, reason=CloudCredentialsInvalid, phase=Degraded |
+| UT-17 | Phase 3 discovery failure | Mock platform discovery returns error | CloudEndpointsDiscovered=False, reason=CloudDiscoveryFailed, phase=Degraded, requeue 30s |
+| UT-18 | Phase 5 failure | Mock platform ReconcileNodes returns error | CloudResourcesReconciled=False, reason=CloudReconcileFailed, phase=Degraded, requeue 30s |
 | UT-19 | Node filtering | 5 nodes: 3 complete, 1 missing IP, 1 missing AZ | Only 3 RouterNodes passed to ReconcileNodes |
 
 #### Deletion

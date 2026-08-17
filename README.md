@@ -154,7 +154,7 @@ The OIDC webhook automatically injects `AWS_ROLE_ARN` and `AWS_WEB_IDENTITY_TOKE
 oc rollout restart deployment/openshift-cudn-bgp-routing-controller-manager -n openshift-cudn-bgp-routing
 ```
 
-The operator reports credential issues as `AWSCredentialsInvalid` in the `CUDNBgpConfig` status. If you see this condition, verify the IAM role trust policy and permissions, then restart the operator.
+The operator reports credential issues as `CloudCredentialsInvalid` in the `CUDNBgpConfig` status. If you see this condition, verify the IAM role trust policy and permissions, then restart the operator.
 
 ### Multi-cloud extensibility
 
@@ -545,7 +545,7 @@ Phase 3: Discover Route Server Infrastructure (if spec.aws configured)
   ├── Build per-AZ neighbor list (endpoint address + remote ASN)
   ├── Build per-AZ endpoint ID list (for peer reconciliation)
   ├── Write discovered data to status.aws.routeServers
-  └── Condition: AWSEndpointsDiscovered
+  └── Condition: CloudEndpointsDiscovered
           │
           ▼
 Phase 4: Apply FRR Configuration (per AZ)
@@ -571,7 +571,7 @@ Phase 5: Reconcile AWS Resources (if spec.aws configured)
   ├── Route Server peers: for each AZ, ensure peers exist on the
   │   discovered endpoint IDs for the local BGP-enabled worker nodes only
   ├── Source/dest check: disable on the primary ENI of each node
-  └── Condition: AWSResourcesReconciled
+  └── Condition: CloudResourcesReconciled
           │
           ▼
      phase: Ready
@@ -630,10 +630,10 @@ Both CRs use the same phase enum. `CUDNBgpRouting` follows `Pending` → `Config
 |:---|:---|:---|
 | `NetworkOperatorPatched` | `PatchFailed` | Failed to patch `Network.operator.openshift.io/cluster` |
 | `FRRNamespaceReady` | `CheckFailed` | Error checking FRR readiness (distinct from simply waiting) |
-| `AWSEndpointsDiscovered` | `AWSCredentialsInvalid` | IRSA credentials not available or `sts:GetCallerIdentity` verification failed (check ServiceAccount annotation and IAM role trust policy) |
-| `AWSEndpointsDiscovered` | `AWSDiscoveryFailed` | Failed to build the AWS platform client (e.g. Infrastructure name unavailable) or to discover Route Server endpoints (invalid Route Server ID, insufficient IAM permissions) |
+| `CloudEndpointsDiscovered` | `CloudCredentialsInvalid` | IRSA credentials not available or `sts:GetCallerIdentity` verification failed (check ServiceAccount annotation and IAM role trust policy) |
+| `CloudEndpointsDiscovered` | `CloudDiscoveryFailed` | Failed to build the AWS platform client (e.g. Infrastructure name unavailable) or to discover Route Server endpoints (invalid Route Server ID, insufficient IAM permissions) |
 | `FRRConfigurationApplied` | `ApplyFailed` | Failed to create/update one or more FRRConfigurations |
-| `AWSResourcesReconciled` | `AWSReconcileFailed` | Failed to reconcile Route Server peers or disable source/dest check |
+| `CloudResourcesReconciled` | `CloudReconcileFailed` | Failed to reconcile Route Server peers or disable source/dest check |
 
 > Phase 2 also uses `FRRNamespaceReady=False` with reason `WaitingForFRR` when the FRR namespace or pods are not yet available. This is **not** `Degraded` — the CR stays in `Configuring` and requeues every 10 seconds.
 

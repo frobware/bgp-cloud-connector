@@ -39,11 +39,15 @@ const (
 )
 
 const (
-	ConditionNetworkOperatorPatched  = "NetworkOperatorPatched"
-	ConditionFRRNamespaceReady       = "FRRNamespaceReady"
-	ConditionAWSEndpointsDiscovered  = "AWSEndpointsDiscovered"
-	ConditionFRRConfigurationApplied = "FRRConfigurationApplied"
-	ConditionAWSResourcesReconciled  = "AWSResourcesReconciled"
+	ConditionNetworkOperatorPatched = "NetworkOperatorPatched"
+	ConditionFRRNamespaceReady      = "FRRNamespaceReady"
+	// The discovery and reconcile conditions are the operator's own, not one
+	// provider's. Every cloud it supports reports them, and a condition named
+	// AWSEndpointsDiscovered on a cluster with no AWS in it is a report
+	// nobody can act on.
+	ConditionCloudEndpointsDiscovered = "CloudEndpointsDiscovered"
+	ConditionFRRConfigurationApplied  = "FRRConfigurationApplied"
+	ConditionCloudResourcesReconciled = "CloudResourcesReconciled"
 )
 
 type BGPNeighbor struct {

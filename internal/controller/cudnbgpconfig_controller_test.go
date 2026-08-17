@@ -333,14 +333,14 @@ func TestConfigReconcile_AWSFullReconcile(t *testing.T) {
 	}
 
 	for _, cond := range updated.Status.Conditions {
-		if cond.Type == networkingv1alpha1.ConditionAWSEndpointsDiscovered {
+		if cond.Type == networkingv1alpha1.ConditionCloudEndpointsDiscovered {
 			if cond.Status != metav1.ConditionTrue {
-				t.Errorf("expected AWSEndpointsDiscovered=True, got %s", cond.Status)
+				t.Errorf("expected CloudEndpointsDiscovered=True, got %s", cond.Status)
 			}
 		}
-		if cond.Type == networkingv1alpha1.ConditionAWSResourcesReconciled {
+		if cond.Type == networkingv1alpha1.ConditionCloudResourcesReconciled {
 			if cond.Status != metav1.ConditionTrue {
-				t.Errorf("expected AWSResourcesReconciled=True, got %s", cond.Status)
+				t.Errorf("expected CloudResourcesReconciled=True, got %s", cond.Status)
 			}
 		}
 	}
@@ -395,14 +395,14 @@ func TestConfigReconcile_AWSCredentialFailure(t *testing.T) {
 		t.Errorf("expected Degraded, got %s", updated.Status.Phase)
 	}
 	for _, cond := range updated.Status.Conditions {
-		if cond.Type == networkingv1alpha1.ConditionAWSEndpointsDiscovered {
-			if cond.Reason != "AWSCredentialsInvalid" {
-				t.Errorf("expected reason AWSCredentialsInvalid, got %s", cond.Reason)
+		if cond.Type == networkingv1alpha1.ConditionCloudEndpointsDiscovered {
+			if cond.Reason != "CloudCredentialsInvalid" {
+				t.Errorf("expected reason CloudCredentialsInvalid, got %s", cond.Reason)
 			}
 			return
 		}
 	}
-	t.Error("AWSEndpointsDiscovered condition not found")
+	t.Error("CloudEndpointsDiscovered condition not found")
 }
 
 func TestConfigReconcile_AWSDiscoveryFailure(t *testing.T) {
@@ -448,14 +448,14 @@ func TestConfigReconcile_AWSDiscoveryFailure(t *testing.T) {
 		t.Errorf("expected Degraded, got %s", updated.Status.Phase)
 	}
 	for _, cond := range updated.Status.Conditions {
-		if cond.Type == networkingv1alpha1.ConditionAWSEndpointsDiscovered {
-			if cond.Reason != "AWSDiscoveryFailed" {
-				t.Errorf("expected reason AWSDiscoveryFailed, got %s", cond.Reason)
+		if cond.Type == networkingv1alpha1.ConditionCloudEndpointsDiscovered {
+			if cond.Reason != "CloudDiscoveryFailed" {
+				t.Errorf("expected reason CloudDiscoveryFailed, got %s", cond.Reason)
 			}
 			return
 		}
 	}
-	t.Error("AWSEndpointsDiscovered condition not found")
+	t.Error("CloudEndpointsDiscovered condition not found")
 }
 
 func TestConfigReconcile_AWSReconcileFailure(t *testing.T) {
@@ -502,14 +502,14 @@ func TestConfigReconcile_AWSReconcileFailure(t *testing.T) {
 		t.Errorf("expected Degraded, got %s", updated.Status.Phase)
 	}
 	for _, cond := range updated.Status.Conditions {
-		if cond.Type == networkingv1alpha1.ConditionAWSResourcesReconciled {
-			if cond.Reason != "AWSReconcileFailed" {
-				t.Errorf("expected reason AWSReconcileFailed, got %s", cond.Reason)
+		if cond.Type == networkingv1alpha1.ConditionCloudResourcesReconciled {
+			if cond.Reason != "CloudReconcileFailed" {
+				t.Errorf("expected reason CloudReconcileFailed, got %s", cond.Reason)
 			}
 			return
 		}
 	}
-	t.Error("AWSResourcesReconciled condition not found")
+	t.Error("CloudResourcesReconciled condition not found")
 }
 
 func TestConfigReconcile_AWSNodeFiltering(t *testing.T) {

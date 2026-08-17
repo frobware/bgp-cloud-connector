@@ -19,12 +19,14 @@ import (
 	"os"
 	"testing"
 
+	"github.com/go-logr/logr/funcr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openshift/bgp-cloud-connector/internal/platform"
 )
@@ -92,6 +94,18 @@ func liveRouterNodes(t *testing.T) []platform.RouterNode {
 	return out
 }
 
+// logToTest sends what the platform logs into the test's own output. Without
+// a logger set, controller-runtime prints a stack trace saying so, in the
+// middle of the narration these tests exist to produce. Discarding the logs
+// would silence that too, but the platform's account of what it did belongs
+// beside the assertions about what it did.
+func logToTest(t *testing.T) {
+	t.Helper()
+	logf.SetLogger(funcr.New(func(prefix, args string) {
+		t.Logf("      %s %s", prefix, args)
+	}, funcr.Options{}))
+}
+
 // liveRESTConfig loads the kubeconfig the live tests read the cluster through.
 func liveRESTConfig(t *testing.T) *rest.Config {
 	t.Helper()
@@ -111,6 +125,7 @@ func liveRESTConfig(t *testing.T) *rest.Config {
 func TestGCPLive_ReconcileNodes(t *testing.T) {
 	cfg := liveReconcileConfig(t)
 	ctx := context.Background()
+	logToTest(t)
 
 	nodes := liveRouterNodes(t)
 	t.Logf("router nodes: %d", len(nodes))

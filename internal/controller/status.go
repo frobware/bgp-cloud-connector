@@ -259,6 +259,12 @@ func (r *CUDNBgpRoutingReconciler) patchRoutingStatus(
 	desired := routing.DeepCopy()
 	mutate(desired)
 
+	// The same summary as the config controller writes, from the same
+	// derivation. Both controllers report steps and neither reported the one
+	// answer somebody actually wants.
+	meta.SetStatusCondition(&desired.Status.Conditions,
+		readyCondition(desired.Status.Conditions, desired.Generation))
+
 	if routingStatusEqual(baselineStatus, desired.Status) {
 		// Skip Status().Update when desired status matches etcd to avoid hot-loop writes.
 		routing.Status = desired.Status

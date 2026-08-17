@@ -123,8 +123,14 @@ func TestRoutingReconcile_FullReconcile(t *testing.T) {
 	if updated.Status.Phase != networkingv1alpha1.PhaseReady {
 		t.Errorf("expected Ready, got %s", updated.Status.Phase)
 	}
-	if len(updated.Status.Conditions) != 2 {
-		t.Errorf("expected 2 conditions, got %d", len(updated.Status.Conditions))
+	// The two steps, plus Ready summarising them.
+	if len(updated.Status.Conditions) != 3 {
+		t.Errorf("expected 3 conditions, got %d", len(updated.Status.Conditions))
+	}
+	if ready := findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady); ready == nil {
+		t.Errorf("missing condition %s", networkingv1alpha1.ConditionReady)
+	} else if ready.Status != metav1.ConditionTrue {
+		t.Errorf("condition %s = %s, want True", networkingv1alpha1.ConditionReady, ready.Status)
 	}
 
 	// Verify CUDN created

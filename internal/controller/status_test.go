@@ -152,6 +152,13 @@ func TestPatchRoutingStatus_SkipsUnchangedPending(t *testing.T) {
 			ObservedGeneration: 1,
 		},
 	}
+	// The steady state this path settles into: both steps Unknown while it
+	// waits on the config, and the summary that follows from them. Repeating
+	// the same mutation must not write, or the ten second requeue writes
+	// status every time round.
+	awaitingConfig(routing)
+	routing.Status.Conditions = append(routing.Status.Conditions,
+		readyCondition(routing.Status.Conditions, routing.Generation))
 	baseline := routing.Status.DeepCopy()
 
 	c := fake.NewClientBuilder().WithScheme(testScheme()).WithStatusSubresource(routing).WithObjects(routing).Build()
@@ -160,7 +167,7 @@ func TestPatchRoutingStatus_SkipsUnchangedPending(t *testing.T) {
 	before := routing.DeepCopy()
 	if err := r.patchRoutingStatus(ctx, routing, *baseline, func(rt *networkingv1alpha1.CUDNBgpRouting) {
 		rt.Status.Phase = networkingv1alpha1.PhasePending
-		rt.Status.Conditions = nil
+		awaitingConfig(rt)
 	}); err != nil {
 		t.Fatalf("patchRoutingStatus: %v", err)
 	}

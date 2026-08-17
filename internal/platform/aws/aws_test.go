@@ -713,6 +713,18 @@ func TestCheckPrerequisites_NoPropagation(t *testing.T) {
 	if !strings.Contains(unmet[0], "propagates to no route table") {
 		t.Errorf("unhelpful message: %q", unmet[0])
 	}
+
+	// The message reaches a person through status, so saying what is wrong is
+	// only half of it: it has to say which route server, and what to run. Both
+	// come from this one Sprintf and nothing AWS returns, which is why they are
+	// asserted here rather than against a live VPC -- there, the check only
+	// fires on an estate somebody has deliberately broken, so it never runs.
+	if !strings.Contains(unmet[0], "rs-1") {
+		t.Errorf("message names no route server, so nobody can act on it: %q", unmet[0])
+	}
+	if !strings.Contains(unmet[0], "aws ec2 ") {
+		t.Errorf("message carries no remedy command: %q", unmet[0])
+	}
 }
 
 func TestCheckPrerequisites_Satisfied(t *testing.T) {

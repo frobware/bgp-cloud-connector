@@ -698,11 +698,18 @@ func TestDefaultPlatformBuilder_EveryEnumValueDispatches(t *testing.T) {
 			c := fake.NewClientBuilder().WithScheme(configTestScheme()).Build()
 
 			_, err := defaultPlatformBuilder(context.Background(), c, config)
-			if err == nil {
-				return // dispatched and built, which is more than this asks
-			}
-			if strings.Contains(err.Error(), "no platform implementation") {
+			if err != nil && strings.Contains(err.Error(), "no platform implementation") {
 				t.Errorf("%s reached the default arm: %v", p, err)
+			}
+
+			// Azure and GCP are declared in the API and not implemented here,
+			// which is a state this build is expected to be in and says so.
+			// Implementing one without removing it from this list would pass
+			// silently, so the list is what has to change with it.
+			declaredOnly := p == networkingv1alpha1.PlatformAzure || p == networkingv1alpha1.PlatformGCP
+			reported := err != nil && strings.Contains(err.Error(), "not implemented in this build")
+			if declaredOnly != reported {
+				t.Errorf("%s: declared-but-unimplemented is %t, but the builder reported %v", p, declaredOnly, err)
 			}
 		})
 	}

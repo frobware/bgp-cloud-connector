@@ -17,6 +17,10 @@ type RouterNode struct {
 type DiscoveredNeighbor struct {
 	Address string
 	ASN     int64
+	// EBGPMultiHop is set when the neighbour is not on the node's link, which
+	// is a property of the cloud's topology rather than anything this operator
+	// chooses.
+	EBGPMultiHop bool
 }
 
 // PeerGroup is a set of router nodes sharing a neighbour set. Each becomes one

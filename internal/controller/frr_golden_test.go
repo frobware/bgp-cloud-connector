@@ -241,3 +241,27 @@ func TestFRRGolden_Pruned(t *testing.T) {
 	}
 	assertGolden(t, ctx, c, "frr-pruned")
 }
+
+// TestFRRGolden_MultiHop pins what a neighbour that is not on the node's link
+// produces. It is declarable today under platform: Manual, and it is what a
+// cloud whose BGP endpoint sits in its own subnet will need.
+func TestFRRGolden_MultiHop(t *testing.T) {
+	ctx := context.Background()
+	c := goldenClient()
+
+	config := goldenConfig(networkingv1alpha1.LivenessDetectionBGPKeepalive)
+	config.Spec.BGP.PeerGroups = []networkingv1alpha1.PeerGroup{
+		{
+			NodeSelector: map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
+			Neighbors: []networkingv1alpha1.BGPNeighbor{
+				{Address: "10.1.0.4", RemoteASN: 65515, EBGPMultiHop: true},
+				{Address: "10.1.0.5", RemoteASN: 65515, EBGPMultiHop: true},
+			},
+		},
+	}
+
+	if err := EnsureFRRConfigurations(ctx, c, config); err != nil {
+		t.Fatalf("EnsureFRRConfigurations: %v", err)
+	}
+	assertGolden(t, ctx, c, "frr-multihop")
+}

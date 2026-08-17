@@ -78,8 +78,9 @@ func peerGroupsFromSpec(config *networkingv1alpha1.CUDNBgpConfig) []platform.Pee
 		}
 		for _, n := range g.Neighbors {
 			group.Neighbors = append(group.Neighbors, platform.DiscoveredNeighbor{
-				Address: n.Address,
-				ASN:     n.RemoteASN,
+				Address:      n.Address,
+				ASN:          n.RemoteASN,
+				EBGPMultiHop: n.EBGPMultiHop,
 			})
 		}
 		groups = append(groups, group)
@@ -145,6 +146,11 @@ func ensureSingleFRRConfiguration(
 					"mode": "all",
 				},
 			},
+		}
+		// Omitted rather than written false, so a neighbour that does not need
+		// it produces the same object it always did.
+		if n.EBGPMultiHop {
+			neighbor["ebgpMultiHop"] = true
 		}
 		if config.Spec.BGP.LivenessDetection == networkingv1alpha1.LivenessDetectionBFD {
 			neighbor["bfdProfile"] = "default"

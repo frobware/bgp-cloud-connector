@@ -261,6 +261,13 @@ func defaultPlatformBuilder(ctx context.Context, c client.Client, config *networ
 	switch config.Spec.Platform {
 	case networkingv1alpha1.PlatformAWS:
 		return buildAWSPlatform(ctx, c, config)
+	case networkingv1alpha1.PlatformAzure, networkingv1alpha1.PlatformGCP:
+		// Declared in the API so the shape of the configuration is settled,
+		// and refused here so the gap is stated rather than discovered. This
+		// is deliberately distinct from the default arm: falling through to
+		// that means a value was added to the enum and forgotten, which is a
+		// different fault with a different fix.
+		return nil, fmt.Errorf("platform %q is declared in the API but not implemented in this build", config.Spec.Platform)
 	default:
 		return nil, fmt.Errorf("no platform implementation for %q", config.Spec.Platform)
 	}

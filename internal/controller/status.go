@@ -300,3 +300,12 @@ func (r *CUDNBgpConfigReconciler) reportDeletionBlocked(
 		})
 	})
 }
+
+// readyReason reports why Ready is not True, for a log line that would
+// otherwise say only that it is not.
+func readyReason(conditions []metav1.Condition) string {
+	if c := meta.FindStatusCondition(conditions, networkingv1alpha1.ConditionReady); c != nil {
+		return c.Reason
+	}
+	return ReasonReconciling
+}

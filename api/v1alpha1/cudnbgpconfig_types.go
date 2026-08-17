@@ -28,17 +28,6 @@ const (
 	LivenessDetectionBGPKeepalive LivenessDetectionType = "bgp-keepalive"
 )
 
-// +kubebuilder:validation:Enum=Pending;Configuring;Ready;Degraded;Suspended
-type PhaseType string
-
-const (
-	PhasePending     PhaseType = "Pending"
-	PhaseConfiguring PhaseType = "Configuring"
-	PhaseReady       PhaseType = "Ready"
-	PhaseDegraded    PhaseType = "Degraded"
-	PhaseSuspended   PhaseType = "Suspended"
-)
-
 const (
 	ConditionNetworkOperatorPatched   = "NetworkOperatorPatched"
 	ConditionFRRNamespaceReady        = "FRRNamespaceReady"
@@ -280,7 +269,6 @@ type PeerStatus struct {
 }
 
 type CUDNBgpConfigStatus struct {
-	Phase              PhaseType          `json:"phase,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
 	// PeerGroups is the discovered peering plan: what the operator found in
@@ -301,7 +289,8 @@ type CUDNBgpConfigStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:printcolumn:name="Platform",type="string",JSONPath=".spec.platform"
-// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status"
+// +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].reason"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // CUDNBgpConfig is the singleton cluster-scoped BGP infrastructure configuration.

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -30,7 +31,6 @@ import (
 
 func TestConfigStatusEqual(t *testing.T) {
 	base := networkingv1alpha1.CUDNBgpConfigStatus{
-		Phase:              networkingv1alpha1.PhaseConfiguring,
 		ObservedGeneration: 1,
 		Conditions: []metav1.Condition{
 			{Type: networkingv1alpha1.ConditionFRRNamespaceReady, Status: metav1.ConditionFalse, Reason: "WaitingForFRR"},
@@ -41,19 +41,17 @@ func TestConfigStatusEqual(t *testing.T) {
 		t.Fatal("expected DeepCopy status to be equal")
 	}
 	diff := base.DeepCopy()
-	diff.Phase = networkingv1alpha1.PhaseReady
+	diff.Conditions[0].Status = metav1.ConditionTrue
 	if configStatusEqual(base, *diff) {
-		t.Fatal("expected different phase to be unequal")
+		t.Fatal("expected a changed condition to be unequal")
 	}
 }
 
 func TestRoutingStatusEqual_NilVsEmptyConditions(t *testing.T) {
 	withNil := networkingv1alpha1.CUDNBgpRoutingStatus{
-		Phase:              networkingv1alpha1.PhasePending,
 		ObservedGeneration: 1,
 	}
 	withEmpty := networkingv1alpha1.CUDNBgpRoutingStatus{
-		Phase:              networkingv1alpha1.PhasePending,
 		ObservedGeneration: 1,
 		Conditions:         []metav1.Condition{},
 	}
@@ -71,7 +69,6 @@ func TestPatchConfigStatus_SkipsUnchangedStatus(t *testing.T) {
 			Generation: 1,
 		},
 		Status: networkingv1alpha1.CUDNBgpConfigStatus{
-			Phase:              networkingv1alpha1.PhaseConfiguring,
 			ObservedGeneration: 1,
 		},
 	}
@@ -90,7 +87,6 @@ func TestPatchConfigStatus_SkipsUnchangedStatus(t *testing.T) {
 
 	before := config.DeepCopy()
 	if err := r.patchConfigStatus(ctx, config, *baseline, func(c *networkingv1alpha1.CUDNBgpConfig) {
-		c.Status.Phase = networkingv1alpha1.PhaseConfiguring
 		c.Status.ObservedGeneration = c.Generation
 	}); err != nil {
 		t.Fatalf("patchConfigStatus: %v", err)
@@ -105,7 +101,7 @@ func TestPatchConfigStatus_SkipsUnchangedStatus(t *testing.T) {
 	}
 }
 
-func TestPatchConfigStatus_WritesWhenPhaseChanges(t *testing.T) {
+func TestPatchConfigStatus_WritesWhenStatusChanges(t *testing.T) {
 	ctx := context.Background()
 
 	config := &networkingv1alpha1.CUDNBgpConfig{
@@ -114,7 +110,6 @@ func TestPatchConfigStatus_WritesWhenPhaseChanges(t *testing.T) {
 			Generation: 1,
 		},
 		Status: networkingv1alpha1.CUDNBgpConfigStatus{
-			Phase:              networkingv1alpha1.PhaseConfiguring,
 			ObservedGeneration: 1,
 		},
 	}
@@ -124,8 +119,9 @@ func TestPatchConfigStatus_WritesWhenPhaseChanges(t *testing.T) {
 	r := &CUDNBgpConfigReconciler{Client: c, Scheme: testScheme()}
 
 	if err := r.patchConfigStatus(ctx, config, *baseline, func(c *networkingv1alpha1.CUDNBgpConfig) {
-		c.Status.Phase = networkingv1alpha1.PhaseReady
 		c.Status.ObservedGeneration = c.Generation
+		meta.SetStatusCondition(&c.Status.Conditions,
+			cond(networkingv1alpha1.ConditionFRRNamespaceReady, metav1.ConditionTrue))
 	}); err != nil {
 		t.Fatalf("patchConfigStatus: %v", err)
 	}
@@ -134,8 +130,8 @@ func TestPatchConfigStatus_WritesWhenPhaseChanges(t *testing.T) {
 	if err := c.Get(ctx, types.NamespacedName{Name: SingletonName}, after); err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	if after.Status.Phase != networkingv1alpha1.PhaseReady {
-		t.Fatalf("expected phase Ready, got %q", after.Status.Phase)
+	if !meta.IsStatusConditionTrue(after.Status.Conditions, networkingv1alpha1.ConditionReady) {
+		t.Fatalf("expected Ready, got %v", findCondition(after.Status.Conditions, networkingv1alpha1.ConditionReady))
 	}
 }
 
@@ -148,7 +144,6 @@ func TestPatchRoutingStatus_SkipsUnchangedPending(t *testing.T) {
 			Generation: 1,
 		},
 		Status: networkingv1alpha1.CUDNBgpRoutingStatus{
-			Phase:              networkingv1alpha1.PhasePending,
 			ObservedGeneration: 1,
 		},
 	}
@@ -166,7 +161,6 @@ func TestPatchRoutingStatus_SkipsUnchangedPending(t *testing.T) {
 
 	before := routing.DeepCopy()
 	if err := r.patchRoutingStatus(ctx, routing, *baseline, func(rt *networkingv1alpha1.CUDNBgpRouting) {
-		rt.Status.Phase = networkingv1alpha1.PhasePending
 		awaitingConfig(rt)
 	}); err != nil {
 		t.Fatalf("patchRoutingStatus: %v", err)

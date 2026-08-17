@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -60,7 +61,7 @@ func TestDegrade_ReturnsErrorSoTheQueueBacksOff(t *testing.T) {
 	if err := c.Get(context.Background(), types.NamespacedName{Name: "cluster"}, updated); err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if updated.Status.Phase != networkingv1alpha1.PhaseDegraded {
-		t.Errorf("expected Degraded to be recorded before returning, got %s", updated.Status.Phase)
+	if meta.IsStatusConditionTrue(updated.Status.Conditions, networkingv1alpha1.ConditionReady) {
+		t.Errorf("expected not Ready, got %v", findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady))
 	}
 }

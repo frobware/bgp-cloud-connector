@@ -22,6 +22,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -36,11 +37,12 @@ var _ = Describe("Azure E2E", Ordered, func() {
 		configCR.ResourceVersion = ""
 		Expect(k8sClient.Create(ctx, configCR)).To(Succeed())
 
-		By("waiting for config phase=Ready")
+		By("waiting for the config to report Ready")
 		Eventually(func(g Gomega) {
 			cfg := &networkingv1alpha1.CUDNBgpConfig{}
 			g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configCR.Name}, cfg)).To(Succeed())
-			g.Expect(cfg.Status.Phase).To(Equal(networkingv1alpha1.PhaseReady))
+			g.Expect(meta.IsStatusConditionTrue(cfg.Status.Conditions, networkingv1alpha1.ConditionReady)).
+				To(BeTrue(), "config should report Ready")
 		}).WithTimeout(reconcileTimeout).WithPolling(pollInterval).Should(Succeed())
 	})
 

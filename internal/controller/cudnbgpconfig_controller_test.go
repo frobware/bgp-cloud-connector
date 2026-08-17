@@ -24,6 +24,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -125,8 +126,8 @@ func TestConfigReconcile_FullReconcile(t *testing.T) {
 	if err := c.Get(context.Background(), types.NamespacedName{Name: "cluster"}, updated); err != nil {
 		t.Fatalf("failed to get config: %v", err)
 	}
-	if updated.Status.Phase != networkingv1alpha1.PhaseReady {
-		t.Errorf("expected phase Ready, got %s", updated.Status.Phase)
+	if !meta.IsStatusConditionTrue(updated.Status.Conditions, networkingv1alpha1.ConditionReady) {
+		t.Errorf("expected Ready, got %v", findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady))
 	}
 
 	// Three from the phases this fixture runs, plus Suspended, which is
@@ -337,8 +338,8 @@ func TestConfigReconcile_AWSFullReconcile(t *testing.T) {
 
 	updated := &networkingv1alpha1.CUDNBgpConfig{}
 	_ = c.Get(context.Background(), types.NamespacedName{Name: "cluster"}, updated)
-	if updated.Status.Phase != networkingv1alpha1.PhaseReady {
-		t.Errorf("expected Ready, got %s", updated.Status.Phase)
+	if !meta.IsStatusConditionTrue(updated.Status.Conditions, networkingv1alpha1.ConditionReady) {
+		t.Errorf("expected Ready, got %v", findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady))
 	}
 	// Assert the conditions by name rather than by count, so adding one is a
 	// deliberate edit to this list instead of a number that needs bumping.
@@ -460,8 +461,8 @@ func TestConfigReconcile_AWSCredentialFailure(t *testing.T) {
 
 	updated := &networkingv1alpha1.CUDNBgpConfig{}
 	_ = c.Get(context.Background(), types.NamespacedName{Name: "cluster"}, updated)
-	if updated.Status.Phase != networkingv1alpha1.PhaseDegraded {
-		t.Errorf("expected Degraded, got %s", updated.Status.Phase)
+	if meta.IsStatusConditionTrue(updated.Status.Conditions, networkingv1alpha1.ConditionReady) {
+		t.Errorf("expected not Ready, got %v", findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady))
 	}
 	for _, cond := range updated.Status.Conditions {
 		if cond.Type == networkingv1alpha1.ConditionCloudEndpointsDiscovered {
@@ -518,8 +519,8 @@ func TestConfigReconcile_AWSDiscoveryFailure(t *testing.T) {
 
 	updated := &networkingv1alpha1.CUDNBgpConfig{}
 	_ = c.Get(context.Background(), types.NamespacedName{Name: "cluster"}, updated)
-	if updated.Status.Phase != networkingv1alpha1.PhaseDegraded {
-		t.Errorf("expected Degraded, got %s", updated.Status.Phase)
+	if meta.IsStatusConditionTrue(updated.Status.Conditions, networkingv1alpha1.ConditionReady) {
+		t.Errorf("expected not Ready, got %v", findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady))
 	}
 	for _, cond := range updated.Status.Conditions {
 		if cond.Type == networkingv1alpha1.ConditionCloudEndpointsDiscovered {
@@ -577,8 +578,8 @@ func TestConfigReconcile_AWSReconcileFailure(t *testing.T) {
 
 	updated := &networkingv1alpha1.CUDNBgpConfig{}
 	_ = c.Get(context.Background(), types.NamespacedName{Name: "cluster"}, updated)
-	if updated.Status.Phase != networkingv1alpha1.PhaseDegraded {
-		t.Errorf("expected Degraded, got %s", updated.Status.Phase)
+	if meta.IsStatusConditionTrue(updated.Status.Conditions, networkingv1alpha1.ConditionReady) {
+		t.Errorf("expected not Ready, got %v", findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady))
 	}
 	for _, cond := range updated.Status.Conditions {
 		if cond.Type == networkingv1alpha1.ConditionCloudResourcesReconciled {

@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -50,11 +51,12 @@ var _ = Describe("E2E", Ordered, func() {
 			configCR.ResourceVersion = ""
 			Expect(k8sClient.Create(ctx, configCR)).To(Succeed())
 
-			By("waiting for config phase=Ready")
+			By("waiting for the config to report Ready")
 			Eventually(func(g Gomega) {
 				cfg := &networkingv1alpha1.CUDNBgpConfig{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configCR.Name}, cfg)).To(Succeed())
-				g.Expect(cfg.Status.Phase).To(Equal(networkingv1alpha1.PhaseReady))
+				g.Expect(meta.IsStatusConditionTrue(cfg.Status.Conditions, networkingv1alpha1.ConditionReady)).
+					To(BeTrue(), "config should report Ready")
 			}).WithTimeout(reconcileTimeout).WithPolling(pollInterval).Should(Succeed())
 
 			By("capturing the peering plan the operator reported")
@@ -92,11 +94,12 @@ var _ = Describe("E2E", Ordered, func() {
 			routingCR.ResourceVersion = ""
 			Expect(k8sClient.Create(ctx, routingCR)).To(Succeed())
 
-			By("waiting for routing phase=Ready")
+			By("waiting for the routing to report Ready")
 			Eventually(func(g Gomega) {
 				rt := &networkingv1alpha1.CUDNBgpRouting{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: routingCR.Name}, rt)).To(Succeed())
-				g.Expect(rt.Status.Phase).To(Equal(networkingv1alpha1.PhaseReady))
+				g.Expect(meta.IsStatusConditionTrue(rt.Status.Conditions, networkingv1alpha1.ConditionReady)).
+					To(BeTrue(), "routing should report Ready")
 			}).WithTimeout(reconcileTimeout).WithPolling(pollInterval).Should(Succeed())
 
 			By("verifying CUDN and RouteAdvertisements exist")

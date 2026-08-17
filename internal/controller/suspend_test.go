@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -131,8 +132,8 @@ func TestSuspend_TearsDownAndStops(t *testing.T) {
 	}
 
 	updated := reloadConfig(t, r)
-	if updated.Status.Phase != networkingv1alpha1.PhaseSuspended {
-		t.Errorf("phase = %s, want Suspended", updated.Status.Phase)
+	if meta.IsStatusConditionTrue(updated.Status.Conditions, networkingv1alpha1.ConditionReady) {
+		t.Errorf("expected not Ready, got %v", findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady))
 	}
 	cond := findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionSuspended)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
@@ -185,8 +186,8 @@ func TestSuspend_IsIdempotent(t *testing.T) {
 	}
 
 	updated := reloadConfig(t, r)
-	if updated.Status.Phase != networkingv1alpha1.PhaseSuspended {
-		t.Errorf("phase = %s, want Suspended after repeated passes", updated.Status.Phase)
+	if meta.IsStatusConditionTrue(updated.Status.Conditions, networkingv1alpha1.ConditionReady) {
+		t.Errorf("expected not Ready, got %v", findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady))
 	}
 }
 
@@ -227,8 +228,10 @@ func TestSuspend_ResumeReconciles(t *testing.T) {
 		t.Error("resuming should recreate the FRRConfigurations")
 	}
 	updated := reloadConfig(t, r)
-	if updated.Status.Phase == networkingv1alpha1.PhaseSuspended {
-		t.Error("phase should leave Suspended once the field is cleared")
+	if ready := findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady); ready == nil {
+		t.Error("missing Ready condition after resuming")
+	} else if ready.Reason == ReasonSuspended {
+		t.Error("Ready should stop reporting Suspended once the field is cleared")
 	}
 }
 

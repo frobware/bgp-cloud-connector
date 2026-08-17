@@ -37,7 +37,6 @@ type CUDNBgpRoutingSpec struct {
 }
 
 type CUDNBgpRoutingStatus struct {
-	Phase              PhaseType          `json:"phase,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
 }
@@ -46,7 +45,8 @@ type CUDNBgpRoutingStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:printcolumn:name="Network",type="string",JSONPath=".spec.network.name"
-// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status"
+// +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].reason"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // CUDNBgpRouting declares a single CUDN network to advertise via BGP.

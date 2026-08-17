@@ -18,8 +18,11 @@ spec:
     - jsonPath: .spec.platform
       name: Platform
       type: string
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].reason
+      name: Reason
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -437,14 +440,6 @@ spec:
                   - name
                   type: object
                 type: array
-              phase:
-                enum:
-                - Pending
-                - Configuring
-                - Ready
-                - Degraded
-                - Suspended
-                type: string
             type: object
         type: object
     served: true

@@ -81,7 +81,6 @@ func (r *CUDNBgpRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	routing.Status.Phase = networkingv1alpha1.PhaseConfiguring
 	routing.Status.ObservedGeneration = routing.Generation
 
 	// Pre-check: spec.network.name must be unique across all CUDNBgpRouting CRs
@@ -102,7 +101,6 @@ func (r *CUDNBgpRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	bgpConfig := &networkingv1alpha1.CUDNBgpConfig{}
 	if err := r.Get(ctx, types.NamespacedName{Name: SingletonName}, bgpConfig); err != nil {
 		if err := r.patchRoutingStatus(ctx, routing, *baselineStatus, func(rt *networkingv1alpha1.CUDNBgpRouting) {
-			rt.Status.Phase = networkingv1alpha1.PhasePending
 			awaitingConfig(rt)
 		}); err != nil {
 			return ctrl.Result{}, err
@@ -110,14 +108,14 @@ func (r *CUDNBgpRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		log.Info("CUDNBgpConfig 'cluster' not found, requeueing")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
-	if bgpConfig.Status.Phase != networkingv1alpha1.PhaseReady {
+	if !meta.IsStatusConditionTrue(bgpConfig.Status.Conditions, networkingv1alpha1.ConditionReady) {
 		if err := r.patchRoutingStatus(ctx, routing, *baselineStatus, func(rt *networkingv1alpha1.CUDNBgpRouting) {
-			rt.Status.Phase = networkingv1alpha1.PhasePending
 			awaitingConfig(rt)
 		}); err != nil {
 			return ctrl.Result{}, err
 		}
-		log.Info("CUDNBgpConfig not Ready, requeueing", "phase", bgpConfig.Status.Phase)
+		log.Info("CUDNBgpConfig not Ready, requeueing",
+			"reason", readyReason(bgpConfig.Status.Conditions))
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
@@ -154,12 +152,12 @@ func (r *CUDNBgpRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	})
 
 	if err := r.patchRoutingStatus(ctx, routing, *baselineStatus, func(rt *networkingv1alpha1.CUDNBgpRouting) {
-		rt.Status.Phase = networkingv1alpha1.PhaseReady
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	log.Info("reconciliation complete", "phase", routing.Status.Phase)
+	log.Info("reconciliation complete",
+		"ready", meta.IsStatusConditionTrue(routing.Status.Conditions, networkingv1alpha1.ConditionReady))
 	return ctrl.Result{RequeueAfter: r.resyncInterval()}, nil
 }
 
@@ -212,7 +210,6 @@ func (r *CUDNBgpRoutingReconciler) setBlocked(
 	logf.FromContext(ctx).Info("waiting for the configuration to be corrected", "reason", reason, "message", message)
 
 	if err := r.patchRoutingStatus(ctx, routing, baselineStatus, func(c *networkingv1alpha1.CUDNBgpRouting) {
-		c.Status.Phase = networkingv1alpha1.PhaseDegraded
 		meta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
 			Type:               condType,
 			Status:             metav1.ConditionFalse,
@@ -235,7 +232,6 @@ func (r *CUDNBgpRoutingReconciler) setDegraded(
 	logf.FromContext(ctx).Error(fmt.Errorf("%s: %s", reason, message), "setting degraded status")
 
 	if err := r.patchRoutingStatus(ctx, routing, baselineStatus, func(rt *networkingv1alpha1.CUDNBgpRouting) {
-		rt.Status.Phase = networkingv1alpha1.PhaseDegraded
 		meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
 			Type:               condType,
 			Status:             metav1.ConditionFalse,

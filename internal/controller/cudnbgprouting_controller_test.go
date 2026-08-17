@@ -22,6 +22,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -75,8 +76,15 @@ func newReadyCUDNBgpConfig() *networkingv1alpha1.CUDNBgpConfig {
 			},
 			RouterNodeSelector: map[string]string{"networking.openshift.io/cudn-bgp-router": ""},
 		},
+		// The routing controller gates on the config reporting Ready, which
+		// is now a condition rather than a phase.
 		Status: networkingv1alpha1.CUDNBgpConfigStatus{
-			Phase: networkingv1alpha1.PhaseReady,
+			Conditions: []metav1.Condition{{
+				Type:               networkingv1alpha1.ConditionReady,
+				Status:             metav1.ConditionTrue,
+				Reason:             ReasonAllConditionsSatisfied,
+				LastTransitionTime: metav1.Now(),
+			}},
 		},
 	}
 }
@@ -120,8 +128,8 @@ func TestRoutingReconcile_FullReconcile(t *testing.T) {
 
 	updated := &networkingv1alpha1.CUDNBgpRouting{}
 	_ = c.Get(context.Background(), types.NamespacedName{Name: "prod"}, updated)
-	if updated.Status.Phase != networkingv1alpha1.PhaseReady {
-		t.Errorf("expected Ready, got %s", updated.Status.Phase)
+	if !meta.IsStatusConditionTrue(updated.Status.Conditions, networkingv1alpha1.ConditionReady) {
+		t.Errorf("expected Ready, got %v", findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady))
 	}
 	// The two steps, plus Ready summarising them.
 	if len(updated.Status.Conditions) != 3 {
@@ -172,8 +180,8 @@ func TestRoutingReconcile_NoNamespace(t *testing.T) {
 
 	updated := &networkingv1alpha1.CUDNBgpRouting{}
 	_ = c.Get(context.Background(), types.NamespacedName{Name: "prod"}, updated)
-	if updated.Status.Phase != networkingv1alpha1.PhaseDegraded {
-		t.Errorf("expected Degraded, got %s", updated.Status.Phase)
+	if meta.IsStatusConditionTrue(updated.Status.Conditions, networkingv1alpha1.ConditionReady) {
+		t.Errorf("expected not Ready, got %v", findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady))
 	}
 }
 
@@ -297,8 +305,8 @@ func TestRoutingReconcile_DuplicateNetworkName(t *testing.T) {
 
 	updated := &networkingv1alpha1.CUDNBgpRouting{}
 	_ = c.Get(context.Background(), types.NamespacedName{Name: "prod"}, updated)
-	if updated.Status.Phase != networkingv1alpha1.PhaseDegraded {
-		t.Errorf("expected Degraded, got %s", updated.Status.Phase)
+	if meta.IsStatusConditionTrue(updated.Status.Conditions, networkingv1alpha1.ConditionReady) {
+		t.Errorf("expected not Ready, got %v", findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady))
 	}
 }
 

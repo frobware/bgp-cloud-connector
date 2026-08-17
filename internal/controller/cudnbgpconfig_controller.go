@@ -115,7 +115,6 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return r.reconcileSuspended(ctx, config, *baselineStatus)
 	}
 
-	config.Status.Phase = networkingv1alpha1.PhaseConfiguring
 	config.Status.ObservedGeneration = config.Generation
 
 	// Said explicitly on every pass rather than only when suspending. Absence
@@ -154,7 +153,6 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	if !ready {
 		if err := r.patchConfigStatus(ctx, config, *baselineStatus, func(c *networkingv1alpha1.CUDNBgpConfig) {
-			c.Status.Phase = networkingv1alpha1.PhaseConfiguring
 			c.Status.ObservedGeneration = c.Generation
 			meta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
 				Type:               networkingv1alpha1.ConditionFRRNamespaceReady,
@@ -348,21 +346,19 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 	}
 
-	// Everything the operator owns is reconciled. Ready is still withheld
-	// while a prerequisite is missing, because reporting Ready for work we
-	// did rather than for a path that functions is how a cluster ends up
-	// green with no route to a pod.
-	finalPhase := networkingv1alpha1.PhaseReady
-	if len(unmetPrerequisites) > 0 {
-		finalPhase = networkingv1alpha1.PhaseDegraded
-	}
-	if err := r.patchConfigStatus(ctx, config, *baselineStatus, func(c *networkingv1alpha1.CUDNBgpConfig) {
-		c.Status.Phase = finalPhase
+	// Everything the operator owns is reconciled. This persists what the
+	// phases above accumulated, and Ready is derived from it rather than
+	// decided here: a missing prerequisite leaves PrerequisitesSatisfied
+	// False, so the summary is False too. Reporting ready for work we did
+	// rather than for a path that functions is how a cluster ends up green
+	// with no route to a pod.
+	if err := r.patchConfigStatus(ctx, config, *baselineStatus, func(*networkingv1alpha1.CUDNBgpConfig) {
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	log.Info("reconciliation complete", "phase", config.Status.Phase)
+	log.Info("reconciliation complete",
+		"ready", meta.IsStatusConditionTrue(config.Status.Conditions, networkingv1alpha1.ConditionReady))
 	return ctrl.Result{RequeueAfter: r.resyncInterval()}, nil
 }
 
@@ -623,7 +619,6 @@ func (r *CUDNBgpConfigReconciler) setBlocked(
 	logf.FromContext(ctx).Info("waiting for the configuration to be corrected", "reason", reason, "message", message)
 
 	if err := r.patchConfigStatus(ctx, config, baselineStatus, func(c *networkingv1alpha1.CUDNBgpConfig) {
-		c.Status.Phase = networkingv1alpha1.PhaseDegraded
 		meta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
 			Type:               condType,
 			Status:             metav1.ConditionFalse,
@@ -646,7 +641,6 @@ func (r *CUDNBgpConfigReconciler) setDegraded(
 	logf.FromContext(ctx).Error(fmt.Errorf("%s: %s", reason, message), "setting degraded status")
 
 	if err := r.patchConfigStatus(ctx, config, baselineStatus, func(c *networkingv1alpha1.CUDNBgpConfig) {
-		c.Status.Phase = networkingv1alpha1.PhaseDegraded
 		meta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
 			Type:               condType,
 			Status:             metav1.ConditionFalse,
@@ -760,7 +754,6 @@ func (r *CUDNBgpConfigReconciler) reconcileSuspended(
 	}
 
 	err := r.patchConfigStatus(ctx, config, baseline, func(c *networkingv1alpha1.CUDNBgpConfig) {
-		c.Status.Phase = networkingv1alpha1.PhaseSuspended
 		c.Status.ObservedGeneration = c.Generation
 		c.Status.PeerGroups = nil
 		// Peers goes for the same reason and more sharply: it is the one field

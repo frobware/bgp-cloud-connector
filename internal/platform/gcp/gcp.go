@@ -21,9 +21,6 @@ type Config struct {
 	NCCSpokePrefix  string
 	SiteToSite      bool
 	NestedVirt      bool
-	// MachineNamespace holds the OpenShift Machine objects whose preTerminate
-	// hooks gate instance deletion.
-	MachineNamespace string
 	// LocalASN is the ASN FRR runs with on the router nodes, which is what
 	// Cloud Router peers are configured to expect.
 	LocalASN int64

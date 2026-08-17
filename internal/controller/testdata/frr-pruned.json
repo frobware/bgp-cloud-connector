@@ -1,0 +1,50 @@
+[
+  {
+    "apiVersion": "frrk8s.metallb.io/v1beta1",
+    "kind": "FRRConfiguration",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/managed-by": "cudn-bgp-routing-operator"
+      },
+      "name": "cudn-bgp-az-1",
+      "namespace": "openshift-frr-k8s"
+    },
+    "spec": {
+      "bgp": {
+        "routers": [
+          {
+            "asn": 65001,
+            "neighbors": [
+              {
+                "address": "10.0.1.47",
+                "asn": 64512,
+                "disableMP": true,
+                "toReceive": {
+                  "allowed": {
+                    "mode": "all"
+                  }
+                }
+              },
+              {
+                "address": "10.0.1.183",
+                "asn": 64512,
+                "disableMP": true,
+                "toReceive": {
+                  "allowed": {
+                    "mode": "all"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "nodeSelector": {
+        "matchLabels": {
+          "networking.openshift.io/cudn-bgp-router": "",
+          "topology.kubernetes.io/zone": "us-east-1a"
+        }
+      }
+    }
+  }
+]

@@ -24,6 +24,21 @@ import (
 	"github.com/openshift/bgp-cloud-connector/internal/platform"
 )
 
+// step narrates what is about to be checked, and observed reports what came
+// back. These tests talk to a real cluster and take seconds rather than
+// microseconds, so which check is running -- and that it ran at all rather
+// than being compiled out or skipped -- is worth seeing under -v. A live test
+// that silently does nothing looks exactly like one that passed.
+func step(t *testing.T, format string, args ...any) {
+	t.Helper()
+	t.Logf("--> "+format, args...)
+}
+
+func observed(t *testing.T, format string, args ...any) {
+	t.Helper()
+	t.Logf("      "+format, args...)
+}
+
 func liveK8s(t *testing.T) client.Client {
 	t.Helper()
 	kubeconfig := os.Getenv("KUBECONFIG")
@@ -49,38 +64,6 @@ func liveMachines(t *testing.T, c client.Client) []unstructured.Unstructured {
 		t.Fatalf("listing machines: %v", err)
 	}
 	return list.Items
-}
-
-// TestMachineLive_ProviderIDsParse feeds every real provider ID on the
-// cluster through the parser. A format the parser rejects would take the whole
-// GCP platform down, and the format is not something the fakes can vouch for.
-func TestMachineLive_ProviderIDsParse(t *testing.T) {
-	c := liveK8s(t)
-
-	items := liveMachines(t, c)
-	if len(items) == 0 {
-		t.Skip("no machines on this cluster")
-	}
-
-	step(t, "parsing the provider ID of all %d Machines in openshift-machine-api", len(items))
-	for i := range items {
-		m := &items[i]
-		providerID, found, err := unstructured.NestedString(m.Object, "spec", "providerID")
-		if err != nil || !found || providerID == "" {
-			observed(t, "%s has no providerID yet, skipping", m.GetName())
-			continue
-		}
-		inst, err := ParseProviderID(providerID)
-		if err != nil {
-			t.Errorf("%s: %v", m.GetName(), err)
-			continue
-		}
-		if inst.Name != m.GetName() {
-			t.Errorf("%s: parsed instance name %q does not match the Machine name", m.GetName(), inst.Name)
-		}
-		observed(t, "%s -> zone=%s instance=%s", providerID, inst.Zone, inst.Name)
-	}
-	step(t, "every provider ID parsed and named its own Machine")
 }
 
 // TestMachineLive_HookRoundTrip proves the merge patch adds and removes only

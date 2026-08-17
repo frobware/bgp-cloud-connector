@@ -1,0 +1,41 @@
+apiVersion: networking.openshift.io/v1alpha1
+kind: CUDNBgpConfig
+metadata:
+  name: cluster
+spec:
+  platform: GCP
+
+  bgp:
+    localASN: 65001
+    livenessDetection: bgp-keepalive
+
+  routerNodeSelector:
+    networking.openshift.io/cudn-bgp-router: ""
+
+  # The MachineSet template carries no router label, so a node added by
+  # scaling one is silently not a router unless the operator maintains the
+  # labels itself.
+  autoLabelRouterNodes:
+    eligible:
+      node-role.kubernetes.io/worker: ""
+    exclude:
+      node-role.kubernetes.io/infra: ""
+
+  # Good for amcdermo-2608170800-q8tqz and no other: the names embed the
+  # infrastructure ID. `oc get infrastructure cluster -o
+  # jsonpath='{.status.infrastructureName}'` gives the prefix.
+  #
+  # cloudRouterName must not be <infra>-network-router. That one anchors
+  # Cloud NAT, has no ASN and no interfaces, and the cluster's egress depends
+  # on it. Discovery rejects a router with no interfaces for that reason.
+  #
+  # spokePrefix is the default rather than <infra>-bgp-spoke, because the
+  # gcplive reconcile test built cudn-bgp-spoke-0 on this estate already and
+  # the operator should adopt it rather than stand a second one beside it.
+  gcp:
+    project: openshift-qe
+    region: us-east1
+    cloudRouterName: amcdermo-2608170800-q8tqz-cudn-cr
+    ncc:
+      hubName: amcdermo-2608170800-q8tqz-ncc-hub
+      spokePrefix: cudn-bgp-spoke

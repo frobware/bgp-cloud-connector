@@ -1,0 +1,21 @@
+apiVersion: networking.openshift.io/v1alpha1
+kind: CUDNBgpConfig
+metadata:
+  name: cluster
+spec:
+  platform: AWS
+
+  bgp:
+    localASN: 65001
+    livenessDetection: bgp-keepalive
+
+  routerNodeSelector:
+    networking.openshift.io/cudn-bgp-router: ""
+
+  # Good for amcdermo-2608170942-f5m2r and no other: the route server was
+  # built for that cluster's VPC. A VPC can hold several and their endpoints
+  # are per subnet, which is why AWS discovers one peer group per zone.
+  aws:
+    region: us-east-2
+    routeServerIDs:
+      - rs-0c58b2ae20c416986

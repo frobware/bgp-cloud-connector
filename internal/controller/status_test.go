@@ -75,6 +75,14 @@ func TestPatchConfigStatus_SkipsUnchangedStatus(t *testing.T) {
 			ObservedGeneration: 1,
 		},
 	}
+	// A steady state carries the conditions a reconcile leaves behind,
+	// including the derived Ready. A status with none is not something this
+	// controller ever writes, so testing the no-op path against one would be
+	// testing a state that cannot occur.
+	steady := []metav1.Condition{
+		cond(networkingv1alpha1.ConditionFRRNamespaceReady, metav1.ConditionTrue),
+	}
+	config.Status.Conditions = append(steady, readyCondition(steady, config.Generation))
 	baseline := config.Status.DeepCopy()
 
 	c := fake.NewClientBuilder().WithScheme(testScheme()).WithStatusSubresource(config).WithObjects(config).Build()
@@ -185,5 +193,139 @@ func TestDeletionBlocked_MessageSaysHowToUnblock(t *testing.T) {
 	// an event every pass on a List-ordered slice.
 	if deletionBlockedMessage([]string{"b", "a"}) != deletionBlockedMessage([]string{"a", "b"}) {
 		t.Error("message depends on input order; it will churn between reconciles")
+	}
+}
+
+// cond is shorthand for building the conditions these tests summarise.
+func cond(t string, s metav1.ConditionStatus) metav1.Condition {
+	return metav1.Condition{Type: t, Status: s, Reason: "Test"}
+}
+
+// TestReadyCondition summarises the step conditions into the single answer the
+// API conventions ask for in place of a phase.
+//
+// The cases that matter are the ones a fixed list of required conditions would
+// get wrong: Manual reports fewer conditions than a cloud does, and suspension
+// reports Unknown rather than removing them.
+func TestReadyCondition(t *testing.T) {
+	cloudSteps := []metav1.Condition{
+		cond(networkingv1alpha1.ConditionNetworkOperatorPatched, metav1.ConditionTrue),
+		cond(networkingv1alpha1.ConditionFRRNamespaceReady, metav1.ConditionTrue),
+		cond(networkingv1alpha1.ConditionRouterNodesLabelled, metav1.ConditionTrue),
+		cond(networkingv1alpha1.ConditionCloudEndpointsDiscovered, metav1.ConditionTrue),
+		cond(networkingv1alpha1.ConditionFRRConfigurationApplied, metav1.ConditionTrue),
+		cond(networkingv1alpha1.ConditionCloudResourcesReconciled, metav1.ConditionTrue),
+		cond(networkingv1alpha1.ConditionPrerequisitesSatisfied, metav1.ConditionTrue),
+	}
+
+	tests := []struct {
+		name       string
+		conditions []metav1.Condition
+		want       metav1.ConditionStatus
+		wantReason string
+	}{
+		{
+			name:       "every step satisfied on a cloud",
+			conditions: cloudSteps,
+			want:       metav1.ConditionTrue,
+			wantReason: ReasonAllConditionsSatisfied,
+		},
+		{
+			// Manual builds no platform, so it never reports the three cloud
+			// conditions. A fixed list of required conditions would hold it
+			// permanently not ready.
+			name: "every step satisfied on Manual, which reports fewer",
+			conditions: []metav1.Condition{
+				cond(networkingv1alpha1.ConditionNetworkOperatorPatched, metav1.ConditionTrue),
+				cond(networkingv1alpha1.ConditionFRRNamespaceReady, metav1.ConditionTrue),
+				cond(networkingv1alpha1.ConditionRouterNodesLabelled, metav1.ConditionTrue),
+				cond(networkingv1alpha1.ConditionFRRConfigurationApplied, metav1.ConditionTrue),
+			},
+			want:       metav1.ConditionTrue,
+			wantReason: ReasonAllConditionsSatisfied,
+		},
+		{
+			name: "a step failed",
+			conditions: append(append([]metav1.Condition(nil), cloudSteps[:6]...),
+				cond(networkingv1alpha1.ConditionPrerequisitesSatisfied, metav1.ConditionFalse)),
+			want:       metav1.ConditionFalse,
+			wantReason: ReasonConditionsNotSatisfied,
+		},
+		{
+			// Unknown says the controller is not observing the thing, which is
+			// not the same as it being fine.
+			name: "a step is not being observed",
+			conditions: append(append([]metav1.Condition(nil), cloudSteps[:6]...),
+				cond(networkingv1alpha1.ConditionPrerequisitesSatisfied, metav1.ConditionUnknown)),
+			want:       metav1.ConditionFalse,
+			wantReason: ReasonConditionsNotSatisfied,
+		},
+		{
+			// Suspended is negative polarity: True is the abnormal state, and
+			// a suspended configuration is deliberately not running.
+			name:       "suspended",
+			conditions: append(append([]metav1.Condition(nil), cloudSteps...), cond(networkingv1alpha1.ConditionSuspended, metav1.ConditionTrue)),
+			want:       metav1.ConditionFalse,
+			wantReason: ReasonSuspended,
+		},
+		{
+			// Not suspended is the normal state for a negative condition, and
+			// must not be read as something being wrong.
+			name:       "explicitly not suspended",
+			conditions: append(append([]metav1.Condition(nil), cloudSteps...), cond(networkingv1alpha1.ConditionSuspended, metav1.ConditionFalse)),
+			want:       metav1.ConditionTrue,
+			wantReason: ReasonAllConditionsSatisfied,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := readyCondition(tc.conditions, 7)
+			if got.Type != networkingv1alpha1.ConditionReady {
+				t.Errorf("type: got %q, want %q", got.Type, networkingv1alpha1.ConditionReady)
+			}
+			if got.Status != tc.want {
+				t.Errorf("status: got %s, want %s (message %q)", got.Status, tc.want, got.Message)
+			}
+			if got.Reason != tc.wantReason {
+				t.Errorf("reason: got %q, want %q", got.Reason, tc.wantReason)
+			}
+			if got.ObservedGeneration != 7 {
+				t.Errorf("observedGeneration: got %d, want 7", got.ObservedGeneration)
+			}
+		})
+	}
+}
+
+// TestReadyCondition_NamesWhatIsUnsatisfied checks the message is actionable
+// and stable, since an unstable one re-emits an event on every resync.
+func TestReadyCondition_NamesWhatIsUnsatisfied(t *testing.T) {
+	got := readyCondition([]metav1.Condition{
+		cond(networkingv1alpha1.ConditionFRRConfigurationApplied, metav1.ConditionFalse),
+		cond(networkingv1alpha1.ConditionNetworkOperatorPatched, metav1.ConditionTrue),
+		cond(networkingv1alpha1.ConditionCloudEndpointsDiscovered, metav1.ConditionFalse),
+	}, 1)
+
+	if !strings.Contains(got.Message, networkingv1alpha1.ConditionCloudEndpointsDiscovered) ||
+		!strings.Contains(got.Message, networkingv1alpha1.ConditionFRRConfigurationApplied) {
+		t.Errorf("message should name every unsatisfied condition, got %q", got.Message)
+	}
+	// Sorted, so two reconciles that find the same problems say the same thing.
+	if i, j := strings.Index(got.Message, networkingv1alpha1.ConditionCloudEndpointsDiscovered),
+		strings.Index(got.Message, networkingv1alpha1.ConditionFRRConfigurationApplied); i > j {
+		t.Errorf("unsatisfied conditions should be sorted, got %q", got.Message)
+	}
+}
+
+// TestReadyCondition_NothingReportedYet pins the vacuous case. A configuration
+// that has reported no conditions has not done anything, and summarising an
+// empty set as satisfied would report Ready for work that has not happened.
+func TestReadyCondition_NothingReportedYet(t *testing.T) {
+	got := readyCondition(nil, 3)
+	if got.Status != metav1.ConditionUnknown {
+		t.Errorf("status: got %s, want Unknown (message %q)", got.Status, got.Message)
+	}
+	if got.Reason != ReasonReconciling {
+		t.Errorf("reason: got %q, want %q", got.Reason, ReasonReconciling)
 	}
 }

@@ -48,6 +48,15 @@ const (
 	ConditionCloudResourcesReconciled = "CloudResourcesReconciled"
 	ConditionPrerequisitesSatisfied   = "PrerequisitesSatisfied"
 	ConditionSuspended                = "Suspended"
+
+	// ConditionReady summarises every other condition into the single answer
+	// to "is this working", which the API conventions ask for in place of a
+	// phase.
+	//
+	// It is derived rather than set by any one step, so nothing reports Ready
+	// directly. Reading it is the supported way to ask; the conditions it
+	// summarises say which part is wrong when it is False.
+	ConditionReady = "Ready"
 )
 
 // PlatformType selects which cloud the operator reconciles BGP peering

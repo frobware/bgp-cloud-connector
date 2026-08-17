@@ -53,6 +53,12 @@ func (r *CUDNBgpConfigReconciler) patchConfigStatus(
 	desired := config.DeepCopy()
 	mutate(desired)
 
+	// Derived here, from the one place status is written, so Ready is always
+	// a summary of the conditions actually being persisted rather than a
+	// second opinion computed somewhere else.
+	meta.SetStatusCondition(&desired.Status.Conditions,
+		readyCondition(desired.Status.Conditions, desired.Generation))
+
 	if configStatusEqual(baselineStatus, desired.Status) {
 		// Skip Status().Update when desired status matches etcd to avoid hot-loop writes.
 		config.Status = desired.Status
@@ -84,6 +90,92 @@ func (r *CUDNBgpConfigReconciler) patchConfigStatus(
 var negativePolarityConditions = map[string]struct{}{
 	networkingv1alpha1.ConditionSuspended: {},
 	ConditionDeletionBlocked:              {},
+}
+
+// Reasons carried by the Ready condition.
+const (
+	ReasonAllConditionsSatisfied = "AllConditionsSatisfied"
+	ReasonConditionsNotSatisfied = "ConditionsNotSatisfied"
+	ReasonSuspended              = "Suspended"
+	ReasonReconciling            = "Reconciling"
+)
+
+// readyCondition summarises the conditions into the one the conventions ask
+// for. It is derived here rather than reported by any step, so it cannot
+// disagree with what it summarises.
+//
+// Every condition present is required to be in its normal state, rather than a
+// fixed list being required to exist. That is what makes this work across
+// platforms without knowing which one it is on: a cloud reports the discovery,
+// reconcile and prerequisite conditions and Manual reports none of the three,
+// so a fixed list would hold Manual permanently not ready.
+//
+// Unknown is not ready. It says the controller is not currently observing the
+// thing, which is what suspension deliberately leaves behind, and reporting
+// Ready for something nobody is watching is the failure this whole condition
+// exists to avoid.
+//
+// The polarity table above is what makes a generic summary possible at all,
+// and reusing it here is what stops Ready and the events it travels with
+// disagreeing about whether a given state is normal.
+func readyCondition(conditions []metav1.Condition, generation int64) metav1.Condition {
+	var unsatisfied []string
+	suspended := false
+	summarised := 0
+
+	for _, c := range conditions {
+		if c.Type == networkingv1alpha1.ConditionReady {
+			continue
+		}
+		summarised++
+		normal := metav1.ConditionTrue
+		if _, negative := negativePolarityConditions[c.Type]; negative {
+			normal = metav1.ConditionFalse
+		}
+		if c.Status == normal {
+			continue
+		}
+		if c.Type == networkingv1alpha1.ConditionSuspended && c.Status == metav1.ConditionTrue {
+			suspended = true
+		}
+		unsatisfied = append(unsatisfied, c.Type)
+	}
+
+	ready := metav1.Condition{
+		Type:               networkingv1alpha1.ConditionReady,
+		Status:             metav1.ConditionTrue,
+		Reason:             ReasonAllConditionsSatisfied,
+		Message:            "every condition the operator reports is satisfied",
+		ObservedGeneration: generation,
+	}
+
+	// An empty set is not a satisfied one. Nothing has been reported yet, so
+	// summarising it as True would claim Ready for work that has not happened.
+	if summarised == 0 {
+		ready.Status = metav1.ConditionUnknown
+		ready.Reason = ReasonReconciling
+		ready.Message = "no conditions reported yet"
+		return ready
+	}
+	if len(unsatisfied) == 0 {
+		return ready
+	}
+
+	// Sorted, because the conditions arrive in whatever order they were last
+	// written: an unsorted message would differ between reconciles and
+	// re-emit an event for a condition that has not changed.
+	sort.Strings(unsatisfied)
+	ready.Status = metav1.ConditionFalse
+	ready.Reason = ReasonConditionsNotSatisfied
+	ready.Message = "not satisfied: " + strings.Join(unsatisfied, ", ")
+
+	// Suspension is a deliberate state rather than a fault, and saying so is
+	// the difference between "somebody turned this off" and "something broke".
+	if suspended {
+		ready.Reason = ReasonSuspended
+		ready.Message = "suspended; " + ready.Message
+	}
+	return ready
 }
 
 // deletionBlockedMessage explains why a delete is not proceeding, and what to

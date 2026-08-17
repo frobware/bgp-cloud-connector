@@ -131,9 +131,14 @@ func TestConfigReconcile_FullReconcile(t *testing.T) {
 
 	// Three from the phases this fixture runs, plus Suspended, which is
 	// reported on every pass because absence of a condition reads as Unknown
-	// rather than as False.
-	if len(updated.Status.Conditions) != 4 {
-		t.Errorf("expected 4 conditions, got %d", len(updated.Status.Conditions))
+	// rather than as False, plus Ready, which summarises them.
+	if len(updated.Status.Conditions) != 5 {
+		t.Errorf("expected 5 conditions, got %d", len(updated.Status.Conditions))
+	}
+	if ready := findCondition(updated.Status.Conditions, networkingv1alpha1.ConditionReady); ready == nil {
+		t.Errorf("missing condition %s", networkingv1alpha1.ConditionReady)
+	} else if ready.Status != metav1.ConditionTrue {
+		t.Errorf("condition %s = %s, want True", networkingv1alpha1.ConditionReady, ready.Status)
 	}
 
 	// Verify FRRConfiguration was created
@@ -365,8 +370,15 @@ func TestConfigReconcile_AWSFullReconcile(t *testing.T) {
 	} else if status != metav1.ConditionFalse {
 		t.Errorf("condition %s = %s, want False", networkingv1alpha1.ConditionSuspended, status)
 	}
-	if len(gotConditions) != len(wantConditions)+1 {
-		t.Errorf("expected conditions %v plus Suspended, got %v", wantConditions, gotConditions)
+	// Ready summarises the rest, so it is reported alongside them and True
+	// once every step above is satisfied.
+	if status, present := gotConditions[networkingv1alpha1.ConditionReady]; !present {
+		t.Errorf("missing condition %s", networkingv1alpha1.ConditionReady)
+	} else if status != metav1.ConditionTrue {
+		t.Errorf("condition %s = %s, want True", networkingv1alpha1.ConditionReady, status)
+	}
+	if len(gotConditions) != len(wantConditions)+2 {
+		t.Errorf("expected conditions %v plus Suspended and Ready, got %v", wantConditions, gotConditions)
 	}
 	// The discovered peering plan is reported for every cloud, not just the
 	// one whose vocabulary the status block used to be written in.

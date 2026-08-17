@@ -1,0 +1,30 @@
+apiVersion: networking.openshift.io/v1alpha1
+kind: CUDNBgpConfig
+metadata:
+  name: cluster
+spec:
+  platform: Azure
+
+  bgp:
+    localASN: 65001
+    livenessDetection: bgp-keepalive
+
+  routerNodeSelector:
+    networking.openshift.io/cudn-bgp-router: ""
+
+  autoLabelRouterNodes:
+    eligible:
+      node-role.kubernetes.io/worker: ""
+    exclude:
+      node-role.kubernetes.io/infra: ""
+
+  # Good for amcdermo-2608170940-jpfqj and no other.
+  #
+  # The Route Server is named rather than its addresses listed: the operator
+  # reads virtualRouterIps and virtualRouterAsn from Azure itself. There is
+  # no far-side ASN to choose either -- Azure fixes it at 65515 and
+  # `az network routeserver create` has no flag to say otherwise.
+  azure:
+    subscriptionID: 53b8f551-f0fc-4bea-8cba-6d1fefd54c8a
+    resourceGroup: amcdermo-2608170940-jpfqj-rg
+    routeServerName: amcdermo-2608170940-jpfqj-rs

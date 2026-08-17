@@ -72,7 +72,7 @@ test/e2e/
       cudnbgprouting.yaml
 ```
 
-E2E tests read CR manifests from a profile directory under `test/e2e/manifests/<profile>/`. Shared E2E tests use CRs without `spec.aws` (explicit `availabilityZones`); provider-specific tests require `spec.aws` (or equivalent).
+E2E tests read CR manifests from a profile directory under `test/e2e/manifests/<profile>/`. Shared E2E tests use CRs under `platform: Manual` (explicit `peerGroups`); provider-specific tests require `spec.aws` (or equivalent).
 
 **Shared E2E tests** validate behavior that only a real cluster with a live BGP peer can exercise — BGP session establishment, route advertisement, FRR config drift recovery, and cleanup. Unit tests cover the reconciliation logic itself; shared E2E tests verify the downstream effect on actual BGP sessions.
 
@@ -133,4 +133,4 @@ When the project moves to an OpenShift CI-managed repository, the following pipe
 | E2E (shared) | Container test + cluster with BGP peer | On demand (`/test e2e <profile>`) |
 | E2E (AWS) | Container test + cluster + cloud credentials | On demand (`/test e2e-aws <profile>`) |
 
-The shared E2E job requires a cluster with an external BGP peer and a profile with explicit `availabilityZones`. The AWS E2E job additionally requires IRSA configured for the operator's ServiceAccount.
+The shared E2E job requires a cluster with an external BGP peer and a profile with explicit `peerGroups`. The AWS E2E job additionally requires IRSA configured for the operator's ServiceAccount.

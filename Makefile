@@ -155,6 +155,13 @@ test-gcp-live: ## Run GCP platform tests against real infrastructure. Needs the 
 	    exit 1; }
 	go test -tags gcplive ./internal/platform/gcp/... -v -count=1
 
+.PHONY: test-cluster-live
+test-cluster-live: ## Run Machine lifecycle tests against a real cluster. Needs the clusterlive tag and KUBECONFIG. Any cloud: it needs a cluster, not a cloud.
+	@[ -n "$(KUBECONFIG)" ] || { \
+	    echo "Set KUBECONFIG to the cluster's auth/kubeconfig."; \
+	    exit 1; }
+	go test -tags clusterlive ./internal/controller/ -run TestMachineLive -v -count=1
+
 .PHONY: test-e2e
 test-e2e: ## Run shared e2e tests (requires cluster + external BGP peer). Usage: make test-e2e <profile>
 	$(eval E2E_PROFILE := $(filter-out $@,$(MAKECMDGOALS)))

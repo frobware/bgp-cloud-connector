@@ -24,7 +24,7 @@ Automated test plan for the CUDN BGP Routing Operator's AWS platform integration
 
 The default credential chain (IRSA) is bypassed in unit tests via mock injection. Discovery API calls (`DescribeRouteServers`, `DescribeRouteServerEndpoints`, `DescribeSubnets`) are mocked alongside the existing peer and instance mocks.
 
-**E2E tests** read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). AWS E2E tests require `spec.aws` to be set. The `rosa-bgp-poc` profile is provided as an example; a custom profile matching the actual ROSA deployment is needed for real testing. The test framework derives expected state from the operator's discovered `status.aws.routeServers` and cluster nodes — no topology is hardcoded in the test code.
+**E2E tests** read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). AWS E2E tests require `spec.aws` to be set. The `rosa-bgp-poc` profile is provided as an example; a custom profile matching the actual ROSA deployment is needed for real testing. The test framework derives expected state from the operator's discovered `status.peerGroups` and cluster nodes — no topology is hardcoded in the test code.
 
 | Component | How discovered |
 |:---|:---|
@@ -93,7 +93,7 @@ Full end-to-end tests running the operator on a ROSA HCP cluster with VPC Route 
 
 | ID | Test Case | Action | Verification |
 |:---|:---|:---|:---|
-| E2E-AWS-01 | Full stack reconcile | Deploy operator, create labeled namespace, apply CUDNBgpConfig and CUDNBgpRouting CRs | Operator Running; config phase=Ready; `status.aws.routeServers` populated with discovered endpoints, IPs, AZs, and remote ASN; FRRConfigurations created per discovered AZ with discovered neighbor addresses; Route Server peers exist per AZ; SourceDestCheck=false on router nodes; routing phase=Ready with CUDN + RouteAdvertisements; FRR pods show established BGP sessions |
+| E2E-AWS-01 | Full stack reconcile | Deploy operator, create labeled namespace, apply CUDNBgpConfig and CUDNBgpRouting CRs | Operator Running; config phase=Ready; `status.peerGroups` populated with the discovered plan, one group per AZ; FRRConfigurations created per discovered AZ with discovered neighbor addresses; Route Server peers exist per AZ; SourceDestCheck=false on router nodes; routing phase=Ready with CUDN + RouteAdvertisements; FRR pods show established BGP sessions |
 
 ### Node Lifecycle
 

@@ -76,20 +76,24 @@ type AWSConfig struct {
 	RouteServerIDs []string `json:"routeServerIDs"`
 }
 
-type DiscoveredEndpoint struct {
-	EndpointID       string `json:"endpointID"`
-	AvailabilityZone string `json:"availabilityZone"`
-	Address          string `json:"address"`
-}
-
-type DiscoveredRouteServer struct {
-	RouteServerID string               `json:"routeServerID"`
-	RemoteASN     int64                `json:"remoteASN"`
-	Endpoints     []DiscoveredEndpoint `json:"endpoints,omitempty"`
-}
-
-type AWSStatus struct {
-	RouteServers []DiscoveredRouteServer `json:"routeServers,omitempty"`
+// PeerGroupStatus reports one group of the peering plan the operator
+// discovered, and therefore what FRR was configured to peer with.
+//
+// It replaced status.aws, which reported Route Server ids, endpoint ids and
+// their availability zones. Only AWS could populate that, so any other cloud
+// would reconcile its peerings and then report nothing at all about them. The
+// alternative was a sibling status block per cloud, which is worse.
+type PeerGroupStatus struct {
+	// Key names the group in cloud-meaningful terms: an availability zone on
+	// AWS, and whatever names the single regional endpoint elsewhere.
+	Key string `json:"key"`
+	// NodeSelector narrows spec.routerNodeSelector to this group. Empty means
+	// every router node.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// Neighbors are the addresses the router nodes in this group peer with.
+	// +optional
+	Neighbors []BGPNeighbor `json:"neighbors,omitempty"`
 }
 
 type BGPConfig struct {
@@ -114,7 +118,10 @@ type CUDNBgpConfigStatus struct {
 	Phase              PhaseType          `json:"phase,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
-	AWS                *AWSStatus         `json:"aws,omitempty"`
+	// PeerGroups is the peering plan the operator arrived at and rendered into
+	// FRRConfigurations. Every cloud populates it.
+	// +optional
+	PeerGroups []PeerGroupStatus `json:"peerGroups,omitempty"`
 }
 
 // +kubebuilder:object:root=true

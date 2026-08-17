@@ -128,37 +128,6 @@ spec:
                 > 0)
           status:
             properties:
-              aws:
-                properties:
-                  routeServers:
-                    items:
-                      properties:
-                        endpoints:
-                          items:
-                            properties:
-                              address:
-                                type: string
-                              availabilityZone:
-                                type: string
-                              endpointID:
-                                type: string
-                            required:
-                            - address
-                            - availabilityZone
-                            - endpointID
-                            type: object
-                          type: array
-                        remoteASN:
-                          format: int64
-                          type: integer
-                        routeServerID:
-                          type: string
-                      required:
-                      - remoteASN
-                      - routeServerID
-                      type: object
-                    type: array
-                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -218,6 +187,53 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              peerGroups:
+                description: |-
+                  PeerGroups is the peering plan the operator arrived at and rendered into
+                  FRRConfigurations. Every cloud populates it.
+                items:
+                  description: |-
+                    PeerGroupStatus reports one group of the peering plan the operator
+                    discovered, and therefore what FRR was configured to peer with.
+
+                    It replaced status.aws, which reported Route Server ids, endpoint ids and
+                    their availability zones. Only AWS could populate that, so any other cloud
+                    would reconcile its peerings and then report nothing at all about them. The
+                    alternative was a sibling status block per cloud, which is worse.
+                  properties:
+                    key:
+                      description: |-
+                        Key names the group in cloud-meaningful terms: an availability zone on
+                        AWS, and whatever names the single regional endpoint elsewhere.
+                      type: string
+                    neighbors:
+                      description: Neighbors are the addresses the router nodes in
+                        this group peer with.
+                      items:
+                        properties:
+                          address:
+                            type: string
+                          remoteASN:
+                            format: int64
+                            maximum: 4294967295
+                            minimum: 0
+                            type: integer
+                        required:
+                        - address
+                        - remoteASN
+                        type: object
+                      type: array
+                    nodeSelector:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        NodeSelector narrows spec.routerNodeSelector to this group. Empty means
+                        every router node.
+                      type: object
+                  required:
+                  - key
+                  type: object
+                type: array
               phase:
                 enum:
                 - Pending

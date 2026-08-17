@@ -207,20 +207,12 @@ func (m *mockPlatform) DiscoverEndpoints(_ context.Context) (*platform.Discovery
 		return m.discoverResult, nil
 	}
 	return &platform.DiscoveryResult{
-		RouteServers: []platform.DiscoveredRouteServer{
+		PeerGroups: []platform.PeerGroup{
 			{
-				RouteServerID: "rs-1",
-				RemoteASN:     64512,
-				Endpoints: []platform.DiscoveredEndpoint{
-					{EndpointID: "rse-001", AZ: "us-east-1a", Address: "10.0.1.47"},
-				},
+				Key:          "us-east-1a",
+				NodeSelector: map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
+				Neighbors:    []platform.DiscoveredNeighbor{{Address: "10.0.1.47", ASN: 64512}},
 			},
-		},
-		NeighborsByAZ: map[string][]platform.DiscoveredNeighbor{
-			"us-east-1a": {{Address: "10.0.1.47", ASN: 64512}},
-		},
-		EndpointsByAZ: map[string][]string{
-			"us-east-1a": {"rse-001"},
 		},
 	}, nil
 }
@@ -325,11 +317,16 @@ func TestConfigReconcile_AWSFullReconcile(t *testing.T) {
 	if len(updated.Status.Conditions) != 5 {
 		t.Errorf("expected 5 conditions, got %d", len(updated.Status.Conditions))
 	}
-	if updated.Status.AWS == nil {
-		t.Fatal("expected status.aws to be populated")
+	// The discovered plan is reported cloud-neutrally: what FRR was told to
+	// peer with, rather than the route servers one cloud happens to have.
+	if len(updated.Status.PeerGroups) != 1 {
+		t.Fatalf("expected 1 peer group in status, got %d", len(updated.Status.PeerGroups))
 	}
-	if len(updated.Status.AWS.RouteServers) != 1 {
-		t.Errorf("expected 1 route server in status, got %d", len(updated.Status.AWS.RouteServers))
+	if got := updated.Status.PeerGroups[0].Key; got != "us-east-1a" {
+		t.Errorf("peer group key = %q, want %q", got, "us-east-1a")
+	}
+	if got := updated.Status.PeerGroups[0].Neighbors; len(got) != 1 || got[0].Address != "10.0.1.47" {
+		t.Errorf("peer group neighbours = %v, want one at 10.0.1.47", got)
 	}
 
 	for _, cond := range updated.Status.Conditions {

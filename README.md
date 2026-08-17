@@ -77,7 +77,7 @@ When AWS platform integration is configured, the operator performs additional ac
 | Reconcile Route Server peers | `DescribeRouteServerPeers`, `CreateRouteServerPeer`, `DeleteRouteServerPeer`, `CreateTags` | BGP-enabled worker node added, removed, or IP changed |
 | Disable SourceDestCheck | `DescribeInstances`, `ModifyNetworkInterfaceAttribute` | New BGP-enabled worker node detected |
 
-**Auto-discovery:** The operator discovers Route Server endpoints, their ENI addresses (BGP neighbor IPs), availability zones, and the Route Server's remote ASN automatically from the provided Route Server IDs. The user does not need to specify per-AZ endpoint IDs or neighbor addresses — the operator derives them via `DescribeRouteServerEndpoints` (endpoint ID + ENI address + subnet), `DescribeSubnets` (subnet → AZ mapping), and `DescribeRouteServers` (remote ASN). Discovered data is written to `status.aws` for observability. This also drives FRR configuration generation — the operator creates one FRRConfiguration per discovered AZ with the discovered neighbor addresses.
+**Auto-discovery:** The operator discovers Route Server endpoints, their ENI addresses (BGP neighbor IPs), availability zones, and the Route Server's remote ASN automatically from the provided Route Server IDs. The user does not need to specify per-AZ endpoint IDs or neighbor addresses — the operator derives them via `DescribeRouteServerEndpoints` (endpoint ID + ENI address + subnet), `DescribeSubnets` (subnet → AZ mapping), and `DescribeRouteServers` (remote ASN). The peering plan it arrives at is written to `status.peerGroups` for observability. This also drives FRR configuration generation — the operator creates one FRRConfiguration per discovered AZ with the discovered neighbor addresses.
 
 Route Server peers are created **per-AZ** — each BGP-enabled worker node is peered with its local AZ's Route Server endpoints. Peers are tagged with `managed-by: cudn-bgp-routing-operator/<infrastructureName>` for lifecycle management, where `<infrastructureName>` is read automatically from the OpenShift `Infrastructure/cluster` object (`status.infrastructureName`). This cluster-scoped tag ensures multiple clusters sharing the same VPC Route Server do not interfere with each other's peers. If a peer already exists at a desired IP but was not created by the operator (e.g. created manually or by Terraform), the operator adopts it by adding the `managed-by` tag rather than attempting to create a duplicate.
 
@@ -323,13 +323,10 @@ spec:
 |:---|:---|
 | `status.phase` | Current lifecycle phase: `Pending`, `Configuring`, `Ready`, or `Degraded`. |
 | `status.conditions[]` | Per-phase condition details. |
-| `status.aws.routeServers[]` | Discovered Route Server information (only when `spec.aws` is set). |
-| `status.aws.routeServers[].routeServerID` | The Route Server ID from `spec.aws.routeServerIDs`. |
-| `status.aws.routeServers[].remoteASN` | The Route Server's Amazon-side ASN (used as `remoteASN` for all BGP neighbors). |
-| `status.aws.routeServers[].endpoints[]` | Discovered endpoints for this Route Server. |
-| `status.aws.routeServers[].endpoints[].endpointID` | Route Server endpoint ID (e.g. `rse-0abc1111`). |
-| `status.aws.routeServers[].endpoints[].availabilityZone` | AZ derived from the endpoint's subnet. |
-| `status.aws.routeServers[].endpoints[].address` | ENI address of the endpoint (BGP neighbor IP). |
+| `status.peerGroups[]` | The peering plan the operator discovered and rendered into FRRConfigurations. |
+| `status.peerGroups[].key` | Names the group in cloud terms: the availability zone on AWS. |
+| `status.peerGroups[].nodeSelector` | Narrows `spec.routerNodeSelector` to this group's nodes. |
+| `status.peerGroups[].neighbors[]` | The addresses this group's router nodes peer with. |
 
 **CUDNBgpRouting** (application teams create per project):
 
@@ -544,7 +541,7 @@ Phase 3: Discover Route Server Infrastructure (if spec.aws configured)
   │     • DescribeSubnets → AZ for each endpoint
   ├── Build per-AZ neighbor list (endpoint address + remote ASN)
   ├── Build per-AZ endpoint ID list (for peer reconciliation)
-  ├── Write discovered data to status.aws.routeServers
+  ├── Write the discovered peering plan to status.peerGroups
   └── Condition: CloudEndpointsDiscovered
           │
           ▼

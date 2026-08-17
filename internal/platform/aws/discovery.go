@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -15,10 +16,11 @@ import (
 func (p *Platform) DiscoverEndpoints(ctx context.Context) (*platform.DiscoveryResult, error) {
 	logger := log.FromContext(ctx)
 
-	result := &platform.DiscoveryResult{
-		NeighborsByAZ: make(map[string][]platform.DiscoveredNeighbor),
-		EndpointsByAZ: make(map[string][]string),
-	}
+	// Accumulated per zone first, because an endpoint is discovered against
+	// its subnet and only the subnet knows the zone. The groups are built from
+	// these once every route server has been walked.
+	neighborsByAZ := make(map[string][]platform.DiscoveredNeighbor)
+	endpointsByAZ := make(map[string][]string)
 
 	for _, rsID := range p.routeServerIDs {
 		rs, err := p.describeRouteServer(ctx, rsID)
@@ -45,11 +47,6 @@ func (p *Platform) DiscoverEndpoints(ctx context.Context) (*platform.DiscoveryRe
 			return nil, fmt.Errorf("resolving subnet AZs for route server %s: %w", rsID, err)
 		}
 
-		discoveredRS := platform.DiscoveredRouteServer{
-			RouteServerID: rsID,
-			RemoteASN:     remoteASN,
-		}
-
 		for _, ep := range endpoints {
 			epID := aws.ToString(ep.RouteServerEndpointId)
 			address := aws.ToString(ep.EniAddress)
@@ -58,24 +55,43 @@ func (p *Platform) DiscoverEndpoints(ctx context.Context) (*platform.DiscoveryRe
 
 			logger.Info("discovered endpoint", "endpointID", epID, "az", az, "address", address)
 
-			discoveredRS.Endpoints = append(discoveredRS.Endpoints, platform.DiscoveredEndpoint{
-				EndpointID: epID,
-				AZ:         az,
-				Address:    address,
-			})
-
-			result.NeighborsByAZ[az] = append(result.NeighborsByAZ[az], platform.DiscoveredNeighbor{
+			neighborsByAZ[az] = append(neighborsByAZ[az], platform.DiscoveredNeighbor{
 				Address: address,
 				ASN:     remoteASN,
 			})
-			result.EndpointsByAZ[az] = append(result.EndpointsByAZ[az], epID)
+			endpointsByAZ[az] = append(endpointsByAZ[az], epID)
 		}
-
-		result.RouteServers = append(result.RouteServers, discoveredRS)
 	}
 
-	p.endpointsByAZ = result.EndpointsByAZ
-	return result, nil
+	// Kept privately rather than reported, because peer reconciliation needs
+	// to know which endpoints sit in which zone and nothing outside this
+	// package does.
+	p.endpointsByAZ = endpointsByAZ
+
+	return &platform.DiscoveryResult{PeerGroups: peerGroupsByAZ(neighborsByAZ)}, nil
+}
+
+// peerGroupsByAZ turns the per-zone neighbours into one group per zone,
+// selecting the nodes in that zone.
+//
+// Sorted, because the group's position names the FRRConfiguration it becomes,
+// and map iteration order would rename every object on each reconcile.
+func peerGroupsByAZ(neighborsByAZ map[string][]platform.DiscoveredNeighbor) []platform.PeerGroup {
+	azs := make([]string, 0, len(neighborsByAZ))
+	for az := range neighborsByAZ {
+		azs = append(azs, az)
+	}
+	sort.Strings(azs)
+
+	groups := make([]platform.PeerGroup, 0, len(azs))
+	for _, az := range azs {
+		groups = append(groups, platform.PeerGroup{
+			Key:          az,
+			NodeSelector: map[string]string{"topology.kubernetes.io/zone": az},
+			Neighbors:    neighborsByAZ[az],
+		})
+	}
+	return groups
 }
 
 func (p *Platform) describeRouteServer(ctx context.Context, routeServerID string) (*ec2types.RouteServer, error) {

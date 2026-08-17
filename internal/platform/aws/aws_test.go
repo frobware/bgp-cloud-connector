@@ -506,21 +506,26 @@ func TestDiscoverEndpoints_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.RouteServers) != 1 {
-		t.Fatalf("expected 1 route server, got %d", len(result.RouteServers))
+	// One group per zone, in zone order, because the group's position names
+	// the FRRConfiguration it becomes.
+	if len(result.PeerGroups) != 3 {
+		t.Fatalf("expected 3 peer groups, got %d", len(result.PeerGroups))
 	}
-	if result.RouteServers[0].RemoteASN != 64512 {
-		t.Errorf("expected ASN 64512, got %d", result.RouteServers[0].RemoteASN)
-	}
-	if len(result.RouteServers[0].Endpoints) != 6 {
-		t.Fatalf("expected 6 endpoints, got %d", len(result.RouteServers[0].Endpoints))
-	}
-	if len(result.NeighborsByAZ) != 3 {
-		t.Fatalf("expected 3 AZs in neighbors, got %d", len(result.NeighborsByAZ))
-	}
-	for _, az := range []string{"us-east-1a", "us-east-1b", "us-east-1c"} {
-		if len(result.NeighborsByAZ[az]) != 2 {
-			t.Errorf("expected 2 neighbors in %s, got %d", az, len(result.NeighborsByAZ[az]))
+	for i, az := range []string{"us-east-1a", "us-east-1b", "us-east-1c"} {
+		g := result.PeerGroups[i]
+		if g.Key != az {
+			t.Errorf("group %d key = %q, want %q", i, g.Key, az)
+		}
+		if got := g.NodeSelector["topology.kubernetes.io/zone"]; got != az {
+			t.Errorf("group %q selects zone %q; key and selector should agree", g.Key, got)
+		}
+		if len(g.Neighbors) != 2 {
+			t.Errorf("expected 2 neighbours in %s, got %d", az, len(g.Neighbors))
+		}
+		for _, n := range g.Neighbors {
+			if n.ASN != 64512 {
+				t.Errorf("neighbour %s ASN = %d, want 64512", n.Address, n.ASN)
+			}
 		}
 	}
 	if len(p.endpointsByAZ) != 3 {
@@ -584,11 +589,13 @@ func TestDiscoverEndpoints_MultipleRouteServers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.RouteServers) != 2 {
-		t.Fatalf("expected 2 route servers, got %d", len(result.RouteServers))
+	// Two route servers in one zone collapse into one group: a node peers
+	// with every endpoint in its zone, whichever server they belong to.
+	if len(result.PeerGroups) != 1 {
+		t.Fatalf("expected 1 peer group, got %d", len(result.PeerGroups))
 	}
-	if len(result.NeighborsByAZ["us-east-1a"]) != 2 {
-		t.Errorf("expected 2 neighbors in us-east-1a (from 2 RS), got %d", len(result.NeighborsByAZ["us-east-1a"]))
+	if got := result.PeerGroups[0].Neighbors; len(got) != 2 {
+		t.Errorf("expected 2 neighbours in us-east-1a from 2 route servers, got %d", len(got))
 	}
 }
 
@@ -645,8 +652,8 @@ func TestDiscoverEndpoints_PaginatesEndpoints(t *testing.T) {
 		t.Fatalf("expected 2 DescribeRouteServerEndpoints calls, got %d", calls)
 	}
 	total := 0
-	for _, eps := range result.EndpointsByAZ {
-		total += len(eps)
+	for _, g := range result.PeerGroups {
+		total += len(g.Neighbors)
 	}
 	if total != 3 {
 		t.Fatalf("expected 3 endpoints across pages, got %d", total)
@@ -680,8 +687,8 @@ func TestDiscoverEndpoints_EmptyStringNextTokenStops(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("expected 1 call when NextToken is empty string, got %d", calls)
 	}
-	if len(result.EndpointsByAZ["us-east-1a"]) != 1 {
-		t.Fatalf("expected 1 endpoint, got %d", len(result.EndpointsByAZ["us-east-1a"]))
+	if len(result.PeerGroups) != 1 || len(result.PeerGroups[0].Neighbors) != 1 {
+		t.Fatalf("expected 1 endpoint in 1 group, got %v", result.PeerGroups)
 	}
 }
 
@@ -767,11 +774,11 @@ func TestDiscoverEndpoints_MultipleRouteServers_Paginates(t *testing.T) {
 	if calls != 4 {
 		t.Fatalf("expected 4 endpoint describe calls (2 RS × 2 pages), got %d", calls)
 	}
-	if len(result.RouteServers) != 2 {
-		t.Fatalf("expected 2 route servers, got %d", len(result.RouteServers))
+	if len(result.PeerGroups) != 1 {
+		t.Fatalf("expected 1 peer group, got %d", len(result.PeerGroups))
 	}
-	if len(result.NeighborsByAZ["us-east-1a"]) != 2 {
-		t.Errorf("expected 2 neighbors in us-east-1a, got %d", len(result.NeighborsByAZ["us-east-1a"]))
+	if got := result.PeerGroups[0].Neighbors; len(got) != 2 {
+		t.Errorf("expected 2 neighbours in us-east-1a across both route servers, got %d", len(got))
 	}
 }
 

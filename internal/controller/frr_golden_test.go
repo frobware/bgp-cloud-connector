@@ -194,20 +194,26 @@ func TestFRRGolden_FromDiscovery(t *testing.T) {
 		},
 	}
 
-	dr := &platform.DiscoveryResult{
-		NeighborsByAZ: map[string][]platform.DiscoveredNeighbor{
-			"us-east-1a": {
+	groups := []platform.PeerGroup{
+		{
+			Key:          "us-east-1a",
+			NodeSelector: map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
+			Neighbors: []platform.DiscoveredNeighbor{
 				{Address: "10.0.1.47", ASN: 64512},
 				{Address: "10.0.1.183", ASN: 64512},
 			},
-			"us-east-1b": {
+		},
+		{
+			Key:          "us-east-1b",
+			NodeSelector: map[string]string{"topology.kubernetes.io/zone": "us-east-1b"},
+			Neighbors: []platform.DiscoveredNeighbor{
 				{Address: "10.0.2.47", ASN: 64512},
 			},
 		},
 	}
 
-	if _, err := EnsureFRRConfigurationsFromDiscovery(ctx, c, config, dr); err != nil {
-		t.Fatalf("EnsureFRRConfigurationsFromDiscovery: %v", err)
+	if _, err := EnsureFRRConfigurationsFromGroups(ctx, c, config, groups); err != nil {
+		t.Fatalf("EnsureFRRConfigurationsFromGroups: %v", err)
 	}
 	assertGolden(t, ctx, c, "frr-from-discovery")
 }

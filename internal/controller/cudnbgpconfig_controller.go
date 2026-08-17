@@ -169,12 +169,12 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudEndpointsDiscovered,
 				"CloudDiscoveryFailed", fmt.Sprintf("failed to discover cloud BGP endpoints: %v", err))
 		}
-		config.Status.AWS = discoveryResultToStatus(discoveryResult)
+		config.Status.PeerGroups = peerGroupsToStatus(discoveryResult.PeerGroups)
 		meta.SetStatusCondition(&config.Status.Conditions, metav1.Condition{
 			Type:               networkingv1alpha1.ConditionCloudEndpointsDiscovered,
 			Status:             metav1.ConditionTrue,
 			Reason:             "Discovered",
-			Message:            fmt.Sprintf("Discovered %d Route Server(s) with endpoints across %d AZ(s)", len(discoveryResult.RouteServers), len(discoveryResult.NeighborsByAZ)),
+			Message:            fmt.Sprintf("Discovered %d peer group(s)", len(discoveryResult.PeerGroups)),
 			ObservedGeneration: config.Generation,
 		})
 	}
@@ -183,7 +183,7 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	log.Info("Phase 4: applying FRR configurations")
 	var frrCount int
 	if config.Spec.AWS != nil && discoveryResult != nil {
-		frrCount, err = EnsureFRRConfigurationsFromDiscovery(ctx, r.Client, config, discoveryResult)
+		frrCount, err = EnsureFRRConfigurationsFromGroups(ctx, r.Client, config, discoveryResult.PeerGroups)
 	} else {
 		frrCount = len(config.Spec.BGP.PeerGroups)
 		err = EnsureFRRConfigurations(ctx, r.Client, config)
@@ -231,23 +231,27 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func discoveryResultToStatus(dr *platform.DiscoveryResult) *networkingv1alpha1.AWSStatus {
-	status := &networkingv1alpha1.AWSStatus{}
-	for _, rs := range dr.RouteServers {
-		drs := networkingv1alpha1.DiscoveredRouteServer{
-			RouteServerID: rs.RouteServerID,
-			RemoteASN:     rs.RemoteASN,
+// peerGroupsToStatus reports the peering plan, which is what FRR was told to
+// peer with and therefore the thing worth reading.
+func peerGroupsToStatus(groups []platform.PeerGroup) []networkingv1alpha1.PeerGroupStatus {
+	if len(groups) == 0 {
+		return nil
+	}
+	out := make([]networkingv1alpha1.PeerGroupStatus, 0, len(groups))
+	for _, g := range groups {
+		pg := networkingv1alpha1.PeerGroupStatus{
+			Key:          g.Key,
+			NodeSelector: g.NodeSelector,
 		}
-		for _, ep := range rs.Endpoints {
-			drs.Endpoints = append(drs.Endpoints, networkingv1alpha1.DiscoveredEndpoint{
-				EndpointID:       ep.EndpointID,
-				AvailabilityZone: ep.AZ,
-				Address:          ep.Address,
+		for _, n := range g.Neighbors {
+			pg.Neighbors = append(pg.Neighbors, networkingv1alpha1.BGPNeighbor{
+				Address:   n.Address,
+				RemoteASN: n.ASN,
 			})
 		}
-		status.RouteServers = append(status.RouteServers, drs)
+		out = append(out, pg)
 	}
-	return status
+	return out
 }
 
 func defaultPlatformBuilder(ctx context.Context, c client.Client, config *networkingv1alpha1.CUDNBgpConfig) (platform.CloudPlatform, error) {

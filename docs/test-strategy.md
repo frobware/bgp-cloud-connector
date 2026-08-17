@@ -96,15 +96,23 @@ E2E tests read CR manifests from a profile directory under `test/e2e/manifests/<
 | Target | What it runs | Credentials needed |
 |:---|:---|:---|
 | `make test` | Platform-independent unit tests (`internal/controller/`, `api/`, `cmd/`) | No |
-| `make test-aws` | AWS unit tests, mocked (`internal/platform/aws/`) | No |
+| `make test-aws` / `test-gcp` / `test-azure` | That cloud's unit tests, mocked | No |
+| `make test-aws-live` / `test-gcp-live` / `test-azure-live` | That cloud's tests against real infrastructure | Yes (a built estate) |
+| `make test-cluster-live` | Machine lifecycle against a real cluster, any cloud | No (a cluster) |
+| `make verify-live-tests` | Compiles every tag-gated live test without running it | No |
 | `make test-e2e <profile>` | Shared E2E (BGP session + drift recovery) | No (cluster + external BGP peer) |
 | `make test-e2e-aws <profile>` | AWS E2E tests (`test/e2e/aws/`), profile required | Yes (cluster + IRSA configured) |
 
-Two gaps in that table are real rather than editorial. There is no `test-gcp`
-target, and `make test` covers only `./internal/controller/... ./api/...
-./cmd/...`, so **nothing runs the GCP unit tests**. There is no `test-e2e-gcp`
-target and no `test/e2e/gcp` directory, so the GCP platform has no e2e coverage
-at all. Both are tracked in [docs/e2e-plan.md](e2e-plan.md).
+`make test` runs none of the per-cloud unit tests, and the GitHub workflow runs
+`make test`, so the three `test-<cloud>` targets are run by hand. That is worth
+knowing before reading a green CI run as covering the platforms.
+
+The gap the table shows by omission is real: e2e coverage is AWS-only. The
+shared suite requires `spec.bgp.peerGroups`, which CEL permits only under
+`platform: Manual`, so it exercises the declared path and never a cloud's
+discovery. A GCP or Azure profile is rejected by its `BeforeSuite`. There is a
+GCP profile in `test/e2e/manifests/`, and nothing that can run it. Tracked in
+[docs/e2e-plan.md](e2e-plan.md).
 
 ## Platform Interface
 

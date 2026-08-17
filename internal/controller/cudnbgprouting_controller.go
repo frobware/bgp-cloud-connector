@@ -103,7 +103,7 @@ func (r *CUDNBgpRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.Get(ctx, types.NamespacedName{Name: SingletonName}, bgpConfig); err != nil {
 		if err := r.patchRoutingStatus(ctx, routing, *baselineStatus, func(rt *networkingv1alpha1.CUDNBgpRouting) {
 			rt.Status.Phase = networkingv1alpha1.PhasePending
-			rt.Status.Conditions = nil
+			awaitingConfig(rt)
 		}); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -113,7 +113,7 @@ func (r *CUDNBgpRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if bgpConfig.Status.Phase != networkingv1alpha1.PhaseReady {
 		if err := r.patchRoutingStatus(ctx, routing, *baselineStatus, func(rt *networkingv1alpha1.CUDNBgpRouting) {
 			rt.Status.Phase = networkingv1alpha1.PhasePending
-			rt.Status.Conditions = nil
+			awaitingConfig(rt)
 		}); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -300,4 +300,31 @@ func (r *CUDNBgpRoutingReconciler) mapRAToRouting(ctx context.Context, obj clien
 		requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: rt.Name}})
 	}
 	return requests
+}
+
+// awaitingConfig reports that this routing is waiting on the CUDNBgpConfig,
+// rather than deleting what it has already said.
+//
+// Removing the conditions outright is what suspension used to do, and it is
+// wrong for the same reason: a controller applies its conditions so that other
+// components know they exist, absence reads as Unknown anyway, and the last
+// verdict left behind would describe a stack that is no longer being observed.
+//
+// It also has to be stable. This path runs every ten seconds while the config
+// is not Ready, which on Azure is minutes at a time, and conditions rebuilt
+// from nothing on each pass would take a new transition time and write status
+// on every one of them.
+func awaitingConfig(rt *networkingv1alpha1.CUDNBgpRouting) {
+	for _, t := range []string{
+		networkingv1alpha1.ConditionCUDNCreated,
+		networkingv1alpha1.ConditionRouteAdvertisementsCreated,
+	} {
+		meta.SetStatusCondition(&rt.Status.Conditions, metav1.Condition{
+			Type:               t,
+			Status:             metav1.ConditionUnknown,
+			Reason:             "AwaitingCUDNBgpConfig",
+			Message:            "not observed until the CUDNBgpConfig is Ready",
+			ObservedGeneration: rt.Generation,
+		})
+	}
 }

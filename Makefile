@@ -116,7 +116,7 @@ vet: ## Run go vet against code.
 # Every live test sits behind a build tag, so the default build never compiles
 # it and a refactor can break one without anything going red. That is how
 # machineScheme, NewWithClients, step and observed all went stale at once.
-LIVE_TAGS ?= awslive gcplive clusterlive
+LIVE_TAGS ?= awslive gcplive azurelive clusterlive
 
 .PHONY: verify-live-tests
 verify-live-tests: ## Type-check the tag-gated live tests without running them.
@@ -154,6 +154,19 @@ test-gcp-live: ## Run GCP platform tests against real infrastructure. Needs the 
 	    echo "Build the estate first: gcp-create-cloud-router --prerequisites-only"; \
 	    exit 1; }
 	go test -tags gcplive ./internal/platform/gcp/... -v -count=1
+
+.PHONY: test-azure
+test-azure: ## Run Azure platform unit tests (mocked, no credentials needed).
+	go test ./internal/platform/azure/... -v -count=1
+
+.PHONY: test-azure-live
+test-azure-live: ## Run Azure platform tests against real infrastructure. Needs the azurelive tag, an az login and a provisioned Route Server.
+	@[ -n "$(AZURE_LIVE_SUBSCRIPTION_ID)" ] && [ -n "$(AZURE_LIVE_RESOURCE_GROUP)" ] && [ -n "$(AZURE_LIVE_ROUTE_SERVER)" ] || { \
+	    echo "Set AZURE_LIVE_SUBSCRIPTION_ID, AZURE_LIVE_RESOURCE_GROUP and AZURE_LIVE_ROUTE_SERVER."; \
+	    echo "Optional: AZURE_LIVE_CLUSTER_ID, AZURE_LIVE_CLEANUP, KUBECONFIG."; \
+	    echo "Build the estate first: azure-create-route-server --prerequisites-only"; \
+	    exit 1; }
+	go test -tags azurelive ./internal/platform/azure/... -v -count=1 -timeout 60m
 
 .PHONY: test-cluster-live
 test-cluster-live: ## Run Machine lifecycle tests against a real cluster. Needs the clusterlive tag and KUBECONFIG. Any cloud: it needs a cluster, not a cloud.

@@ -33,18 +33,29 @@ func (p *Platform) reconcileRouteServerPeers(ctx context.Context, nodes []platfo
 			}
 
 			managedIPs := make(map[string]string, len(managedPeers))
+			deleting := make(map[string]bool, len(managedPeers))
 			for _, peer := range managedPeers {
-				if peer.PeerAddress != nil && peer.RouteServerPeerId != nil {
-					managedIPs[*peer.PeerAddress] = *peer.RouteServerPeerId
+				if peer.PeerAddress == nil || peer.RouteServerPeerId == nil {
+					continue
+				}
+				// A deleted peer is not one that exists, however long EC2 goes
+				// on listing it.
+				if isDeleted(peer) {
+					continue
+				}
+				managedIPs[*peer.PeerAddress] = *peer.RouteServerPeerId
+				if isDeleting(peer) {
+					deleting[*peer.RouteServerPeerId] = true
 				}
 			}
 
 			for ip, peerID := range managedIPs {
-				if !desiredIPs[ip] {
-					logger.Info("deleting stale route server peer", "endpoint", endpointID, "peerIP", ip, "peerID", peerID, "az", az)
-					if err := p.deletePeer(ctx, peerID); err != nil {
-						return fmt.Errorf("deleting peer %s: %w", peerID, err)
-					}
+				if desiredIPs[ip] || deleting[peerID] {
+					continue
+				}
+				logger.Info("deleting stale route server peer", "endpoint", endpointID, "peerIP", ip, "peerID", peerID, "az", az)
+				if err := p.deletePeer(ctx, peerID); err != nil {
+					return fmt.Errorf("deleting peer %s: %w", peerID, err)
 				}
 			}
 
@@ -54,11 +65,18 @@ func (p *Platform) reconcileRouteServerPeers(ctx context.Context, nodes []platfo
 			}
 			unmanagedIPs := make(map[string]string, len(allPeers))
 			for _, peer := range allPeers {
-				if peer.PeerAddress != nil && peer.RouteServerPeerId != nil {
-					ip := *peer.PeerAddress
-					if _, managed := managedIPs[ip]; !managed {
-						unmanagedIPs[ip] = *peer.RouteServerPeerId
-					}
+				if peer.PeerAddress == nil || peer.RouteServerPeerId == nil {
+					continue
+				}
+				// Adopting a peer that is on its way out, or gone, would tag
+				// something that is about to stop existing and leave the node
+				// with no peer at all.
+				if isDeleting(peer) || isDeleted(peer) {
+					continue
+				}
+				ip := *peer.PeerAddress
+				if _, managed := managedIPs[ip]; !managed {
+					unmanagedIPs[ip] = *peer.RouteServerPeerId
 				}
 			}
 
@@ -171,6 +189,25 @@ func (p *Platform) deletePeer(ctx context.Context, peerID string) error {
 	return err
 }
 
+// EC2 keeps returning a route server peer after it has been deleted, and
+// refuses a delete on one that is deleting or deleted with IncorrectState. The
+// two states are not the same thing, and treating them alike gets one of the
+// two paths wrong.
+//
+// deleting: still holds its address, so it counts as one already there and no
+// replacement is built beside it, but its delete must not be reissued.
+//
+// deleted: holds nothing. It must not count as one already there, or a peer
+// removed out from under the operator is never replaced and drift is never
+// repaired.
+func isDeleting(peer ec2types.RouteServerPeer) bool {
+	return peer.State == ec2types.RouteServerPeerStateDeleting
+}
+
+func isDeleted(peer ec2types.RouteServerPeer) bool {
+	return peer.State == ec2types.RouteServerPeerStateDeleted
+}
+
 func (p *Platform) deleteAllManagedPeers(ctx context.Context) error {
 	for _, endpointIDs := range p.endpointsByAZ {
 		for _, endpointID := range endpointIDs {
@@ -179,10 +216,11 @@ func (p *Platform) deleteAllManagedPeers(ctx context.Context) error {
 				return fmt.Errorf("listing peers for endpoint %s: %w", endpointID, err)
 			}
 			for _, peer := range peers {
-				if peer.RouteServerPeerId != nil {
-					if err := p.deletePeer(ctx, *peer.RouteServerPeerId); err != nil {
-						return fmt.Errorf("deleting peer %s: %w", *peer.RouteServerPeerId, err)
-					}
+				if peer.RouteServerPeerId == nil || isDeleting(peer) || isDeleted(peer) {
+					continue
+				}
+				if err := p.deletePeer(ctx, *peer.RouteServerPeerId); err != nil {
+					return fmt.Errorf("deleting peer %s: %w", *peer.RouteServerPeerId, err)
 				}
 			}
 		}

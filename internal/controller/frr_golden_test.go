@@ -118,7 +118,7 @@ func goldenConfig(liveness networkingv1alpha1.LivenessDetectionType) *networking
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: liveness,
-				AvailabilityZones: []networkingv1alpha1.AvailabilityZone{
+				PeerGroups: []networkingv1alpha1.PeerGroup{
 					{
 						NodeSelector: map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
 						Neighbors: []networkingv1alpha1.BGPNeighbor{
@@ -226,7 +226,7 @@ func TestFRRGolden_Pruned(t *testing.T) {
 	c := goldenClient(stale)
 
 	config := goldenConfig(networkingv1alpha1.LivenessDetectionBGPKeepalive)
-	config.Spec.BGP.AvailabilityZones = config.Spec.BGP.AvailabilityZones[:1]
+	config.Spec.BGP.PeerGroups = config.Spec.BGP.PeerGroups[:1]
 
 	if err := EnsureFRRConfigurations(ctx, c, config); err != nil {
 		t.Fatalf("EnsureFRRConfigurations: %v", err)

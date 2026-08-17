@@ -62,12 +62,12 @@ func IsFRRReady(ctx context.Context, c client.Client) (bool, error) {
 }
 
 func EnsureFRRConfigurations(ctx context.Context, c client.Client, config *networkingv1alpha1.CUDNBgpConfig) error {
-	expected := make(map[string]bool, len(config.Spec.BGP.AvailabilityZones))
-	for i, az := range config.Spec.BGP.AvailabilityZones {
+	expected := make(map[string]bool, len(config.Spec.BGP.PeerGroups))
+	for i, group := range config.Spec.BGP.PeerGroups {
 		name := fmt.Sprintf("%s%d", FRRConfigNamePrefix, i+1)
 		expected[name] = true
-		if err := ensureSingleFRRConfiguration(ctx, c, config, az, name); err != nil {
-			return fmt.Errorf("AZ %d: %w", i+1, err)
+		if err := ensureSingleFRRConfiguration(ctx, c, config, group, name); err != nil {
+			return fmt.Errorf("peer group %d: %w", i+1, err)
 		}
 	}
 
@@ -107,18 +107,18 @@ func EnsureFRRConfigurationsFromDiscovery(
 		expected[name] = true
 
 		neighbors := dr.NeighborsByAZ[az]
-		syntheticAZ := networkingv1alpha1.AvailabilityZone{
+		group := networkingv1alpha1.PeerGroup{
 			NodeSelector: map[string]string{"topology.kubernetes.io/zone": az},
 		}
 		for _, n := range neighbors {
-			syntheticAZ.Neighbors = append(syntheticAZ.Neighbors, networkingv1alpha1.BGPNeighbor{
+			group.Neighbors = append(group.Neighbors, networkingv1alpha1.BGPNeighbor{
 				Address:   n.Address,
 				RemoteASN: n.ASN,
 			})
 		}
 
-		if err := ensureSingleFRRConfiguration(ctx, c, config, syntheticAZ, name); err != nil {
-			return 0, fmt.Errorf("AZ %s: %w", az, err)
+		if err := ensureSingleFRRConfiguration(ctx, c, config, group, name); err != nil {
+			return 0, fmt.Errorf("peer group %s: %w", az, err)
 		}
 	}
 
@@ -144,13 +144,13 @@ func ensureSingleFRRConfiguration(
 	ctx context.Context,
 	c client.Client,
 	config *networkingv1alpha1.CUDNBgpConfig,
-	az networkingv1alpha1.AvailabilityZone,
+	group networkingv1alpha1.PeerGroup,
 	name string,
 ) error {
-	nodeSelector := mergeLabels(config.Spec.RouterNodeSelector, az.NodeSelector)
+	nodeSelector := mergeLabels(config.Spec.RouterNodeSelector, group.NodeSelector)
 
-	neighbors := make([]interface{}, 0, len(az.Neighbors))
-	for _, n := range az.Neighbors {
+	neighbors := make([]interface{}, 0, len(group.Neighbors))
+	for _, n := range group.Neighbors {
 		neighbor := map[string]interface{}{
 			"address":   n.Address,
 			"asn":       n.RemoteASN,

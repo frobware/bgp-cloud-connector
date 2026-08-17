@@ -13,7 +13,7 @@ spec:
   # --- AWS auto-discovery mode ---
   # When spec.aws is set, the operator discovers Route Server endpoints,
   # neighbor IPs, and remote ASN automatically. Do NOT set
-  # spec.bgp.availabilityZones in this mode.
+  # spec.bgp.peerGroups in this mode.
   aws:
     region: us-east-1                # terraform output aws_region
     routeServerIDs:                  # terraform output vpc1_route_server_ids
@@ -23,7 +23,7 @@ spec:
   # When spec.aws is absent, specify neighbors explicitly.
   # bgp:
   #   localASN: 65001
-  #   availabilityZones:
+  #   peerGroups:
   #     - nodeSelector:
   #         topology.kubernetes.io/zone: us-east-1a
   #         bgp_router_subnet: "1"

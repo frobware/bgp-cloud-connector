@@ -3,9 +3,12 @@ package platform
 import "context"
 
 type RouterNode struct {
-	Name       string
-	PrivateIP  string
-	AZ         string
+	Name      string
+	PrivateIP string
+	// Zone is the node's failure domain. Only AWS partitions on it, because
+	// its endpoints are per subnet; it is spelled out rather than abbreviated
+	// to AZ because that abbreviation is one cloud's.
+	Zone       string
 	ProviderID string
 }
 

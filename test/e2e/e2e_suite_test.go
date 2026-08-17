@@ -41,7 +41,7 @@ import (
 
 const (
 	frrNamespace        = "openshift-frr-k8s"
-	frrConfigNamePrefix = "cudn-bgp-az-"
+	frrConfigNamePrefix = "cudn-bgp-"
 	labelManagedBy      = "app.kubernetes.io/managed-by"
 	labelManagedByVal   = "cudn-bgp-routing-operator"
 	labelPrimaryUDN     = "k8s.ovn.org/primary-user-defined-network"
@@ -87,8 +87,8 @@ var _ = BeforeSuite(func() {
 	bgpConfig = &networkingv1alpha1.CUDNBgpConfig{}
 	loadManifest(filepath.Join(manifestDir, "cudnbgpconfig.yaml"), bgpConfig)
 	Expect(bgpConfig.Spec.AWS).To(BeNil(), "shared E2E profile must not have spec.aws")
-	Expect(bgpConfig.Spec.BGP.AvailabilityZones).NotTo(BeEmpty(),
-		"shared E2E profile must have spec.bgp.availabilityZones")
+	Expect(bgpConfig.Spec.BGP.PeerGroups).NotTo(BeEmpty(),
+		"shared E2E profile must have spec.bgp.peerGroups")
 
 	By("loading CUDNBgpRouting manifest from profile " + profile)
 	bgpRouting = &networkingv1alpha1.CUDNBgpRouting{}

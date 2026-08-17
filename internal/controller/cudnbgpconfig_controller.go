@@ -185,7 +185,7 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if config.Spec.AWS != nil && discoveryResult != nil {
 		frrCount, err = EnsureFRRConfigurationsFromDiscovery(ctx, r.Client, config, discoveryResult)
 	} else {
-		frrCount = len(config.Spec.BGP.AvailabilityZones)
+		frrCount = len(config.Spec.BGP.PeerGroups)
 		err = EnsureFRRConfigurations(ctx, r.Client, config)
 	}
 	if err != nil {
@@ -299,7 +299,7 @@ func (r *CUDNBgpConfigReconciler) listRouterNodes(ctx context.Context, config *n
 		rn := platform.RouterNode{
 			Name:       node.Name,
 			ProviderID: node.Spec.ProviderID,
-			AZ:         node.Labels["topology.kubernetes.io/zone"],
+			Zone:       node.Labels["topology.kubernetes.io/zone"],
 		}
 		for _, addr := range node.Status.Addresses {
 			if addr.Type == corev1.NodeInternalIP {
@@ -307,9 +307,9 @@ func (r *CUDNBgpConfigReconciler) listRouterNodes(ctx context.Context, config *n
 				break
 			}
 		}
-		if rn.PrivateIP == "" || rn.AZ == "" || rn.ProviderID == "" {
+		if rn.PrivateIP == "" || rn.Zone == "" || rn.ProviderID == "" {
 			logf.FromContext(ctx).Info("skipping node with incomplete info",
-				"node", node.Name, "ip", rn.PrivateIP, "az", rn.AZ, "providerID", rn.ProviderID)
+				"node", node.Name, "ip", rn.PrivateIP, "zone", rn.Zone, "providerID", rn.ProviderID)
 			continue
 		}
 		nodes = append(nodes, rn)

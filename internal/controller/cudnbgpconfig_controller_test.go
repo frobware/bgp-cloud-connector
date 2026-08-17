@@ -59,7 +59,7 @@ func newTestCUDNBgpConfig() *networkingv1alpha1.CUDNBgpConfig {
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,
-				AvailabilityZones: []networkingv1alpha1.AvailabilityZone{
+				PeerGroups: []networkingv1alpha1.PeerGroup{
 					{
 						NodeSelector: map[string]string{"bgp_router_subnet": "1"},
 						Neighbors: []networkingv1alpha1.BGPNeighbor{
@@ -135,7 +135,7 @@ func TestConfigReconcile_FullReconcile(t *testing.T) {
 	// Verify FRRConfiguration was created
 	frrConfig := &unstructured.Unstructured{}
 	frrConfig.SetGroupVersionKind(FRRConfigurationGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "cudn-bgp-az-1", Namespace: FRRNamespace}, frrConfig); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "cudn-bgp-1", Namespace: FRRNamespace}, frrConfig); err != nil {
 		t.Fatalf("FRRConfiguration not created: %v", err)
 	}
 }
@@ -348,7 +348,7 @@ func TestConfigReconcile_AWSFullReconcile(t *testing.T) {
 	// Verify FRR was created from discovery
 	frrConfig := &unstructured.Unstructured{}
 	frrConfig.SetGroupVersionKind(FRRConfigurationGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "cudn-bgp-az-1", Namespace: FRRNamespace}, frrConfig); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "cudn-bgp-1", Namespace: FRRNamespace}, frrConfig); err != nil {
 		t.Fatalf("FRRConfiguration not created from discovery: %v", err)
 	}
 }
@@ -629,7 +629,7 @@ func TestConfigReconcile_DeleteSuccessful(t *testing.T) {
 			"apiVersion": "frrk8s.metallb.io/v1beta1",
 			"kind":       "FRRConfiguration",
 			"metadata": map[string]interface{}{
-				"name":      "cudn-bgp-az-1",
+				"name":      "cudn-bgp-1",
 				"namespace": FRRNamespace,
 				"labels":    map[string]interface{}{LabelManagedBy: LabelManagedByVal},
 			},
@@ -663,7 +663,7 @@ func TestConfigReconcile_DeleteSuccessful(t *testing.T) {
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(FRRConfigurationGVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "cudn-bgp-az-1", Namespace: FRRNamespace}, obj); err == nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "cudn-bgp-1", Namespace: FRRNamespace}, obj); err == nil {
 		t.Error("FRRConfiguration should be deleted during cleanup")
 	}
 

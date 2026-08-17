@@ -53,7 +53,14 @@ type BGPNeighbor struct {
 	RemoteASN int64 `json:"remoteASN"`
 }
 
-type AvailabilityZone struct {
+// PeerGroup is a set of router nodes sharing a neighbour set, and becomes one
+// FRRConfiguration.
+//
+// It was AvailabilityZone, which is a concept only AWS has here: its Route
+// Server endpoints are per subnet and therefore per zone, so a node peers with
+// the ones in its own. Nothing about the type requires that, and a cloud whose
+// neighbours are regional has one group rather than one per zone.
+type PeerGroup struct {
 	NodeSelector map[string]string `json:"nodeSelector"`
 	// +kubebuilder:validation:MinItems=1
 	Neighbors []BGPNeighbor `json:"neighbors"`
@@ -88,11 +95,11 @@ type BGPConfig struct {
 	// +kubebuilder:default="bgp-keepalive"
 	LivenessDetection LivenessDetectionType `json:"livenessDetection,omitempty"`
 	// +optional
-	AvailabilityZones []AvailabilityZone `json:"availabilityZones,omitempty"`
+	PeerGroups []PeerGroup `json:"peerGroups,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="!(has(self.aws) && has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones) > 0)",message="spec.aws and spec.bgp.availabilityZones are mutually exclusive"
-// +kubebuilder:validation:XValidation:rule="has(self.aws) || (has(self.bgp.availabilityZones) && size(self.bgp.availabilityZones) > 0)",message="spec.bgp.availabilityZones is required when spec.aws is not configured"
+// +kubebuilder:validation:XValidation:rule="!(has(self.aws) && has(self.bgp.peerGroups) && size(self.bgp.peerGroups) > 0)",message="spec.aws and spec.bgp.peerGroups are mutually exclusive"
+// +kubebuilder:validation:XValidation:rule="has(self.aws) || (has(self.bgp.peerGroups) && size(self.bgp.peerGroups) > 0)",message="spec.bgp.peerGroups is required when spec.aws is not configured"
 type CUDNBgpConfigSpec struct {
 	BGP                BGPConfig         `json:"bgp"`
 	RouterNodeSelector map[string]string `json:"routerNodeSelector"`

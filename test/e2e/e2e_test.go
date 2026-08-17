@@ -58,7 +58,7 @@ var _ = Describe("E2E", Ordered, func() {
 			}).WithTimeout(reconcileTimeout).WithPolling(pollInterval).Should(Succeed())
 
 			By("verifying FRRConfigurations exist")
-			azCount := len(bgpConfig.Spec.BGP.AvailabilityZones)
+			azCount := len(bgpConfig.Spec.BGP.PeerGroups)
 			for i := 1; i <= azCount; i++ {
 				frrCfg := &unstructured.Unstructured{}
 				frrCfg.SetGroupVersionKind(frrConfigurationGVK)
@@ -118,7 +118,7 @@ var _ = Describe("E2E", Ordered, func() {
 	// -----------------------------------------------------------
 	Context("E2E-02: FRRConfiguration deleted", func() {
 		It("should recreate FRRConfiguration and re-establish BGP sessions", func(ctx context.Context) {
-			azCount := len(bgpConfig.Spec.BGP.AvailabilityZones)
+			azCount := len(bgpConfig.Spec.BGP.PeerGroups)
 
 			By("deleting operator-managed FRRConfigurations")
 			for i := 1; i <= azCount; i++ {
@@ -245,7 +245,7 @@ var _ = Describe("E2E", Ordered, func() {
 			}).WithTimeout(reconcileTimeout).WithPolling(pollInterval).Should(Succeed())
 
 			By("verifying FRRConfigurations are deleted")
-			azCount := len(bgpConfig.Spec.BGP.AvailabilityZones)
+			azCount := len(bgpConfig.Spec.BGP.PeerGroups)
 			for i := 1; i <= azCount; i++ {
 				frrCfg := &unstructured.Unstructured{}
 				frrCfg.SetGroupVersionKind(frrConfigurationGVK)
@@ -273,7 +273,7 @@ var _ = Describe("E2E", Ordered, func() {
 
 func assertBGPNotEstablished(ctx context.Context) {
 	neighborAddrs := make(map[string]bool)
-	for _, az := range bgpConfig.Spec.BGP.AvailabilityZones {
+	for _, az := range bgpConfig.Spec.BGP.PeerGroups {
 		for _, n := range az.Neighbors {
 			neighborAddrs[n.Address] = true
 		}
@@ -323,7 +323,7 @@ func assertBGPEstablished(ctx context.Context) {
 	Expect(nodes).NotTo(BeEmpty(), "expected at least 1 router node")
 
 	neighborAddrs := make(map[string]bool)
-	for _, az := range bgpConfig.Spec.BGP.AvailabilityZones {
+	for _, az := range bgpConfig.Spec.BGP.PeerGroups {
 		for _, n := range az.Neighbors {
 			neighborAddrs[n.Address] = true
 		}

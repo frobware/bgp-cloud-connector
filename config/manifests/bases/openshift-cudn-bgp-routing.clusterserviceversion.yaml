@@ -12,7 +12,7 @@ metadata:
             "bgp": {
               "localASN": 65001,
               "livenessDetection": "bgp-keepalive",
-              "availabilityZones": [
+              "peerGroups": [
                 {
                   "nodeSelector": {"bgp_router_subnet": "1"},
                   "neighbors": [

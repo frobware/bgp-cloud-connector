@@ -22,6 +22,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -36,7 +37,6 @@ func liveReconcileConfig(t *testing.T) Config {
 	cfg.NCCHubName = os.Getenv("GCP_NCC_HUB")
 	cfg.NCCSpokePrefix = envOr("GCP_NCC_SPOKE_PREFIX", "cudn-bgp-spoke")
 	cfg.ClusterID = envOr("GCP_CLUSTER_ID", "e2e")
-	cfg.MachineNamespace = "openshift-machine-api"
 	// Nested virtualisation restarts the instance, so it stays off unless
 	// asked for explicitly.
 	cfg.NestedVirt = os.Getenv("GCP_NESTED_VIRT") == "1"
@@ -54,20 +54,9 @@ func envOr(key, fallback string) string {
 }
 
 // liveRouterNodes reads the labelled nodes the same way the controller does.
-func liveRouterNodes(t *testing.T) ([]platform.RouterNode, client.Client) {
+func liveRouterNodes(t *testing.T) []platform.RouterNode {
 	t.Helper()
-	kubeconfig := os.Getenv("KUBECONFIG")
-	if kubeconfig == "" {
-		t.Skip("KUBECONFIG must be set")
-	}
-	restCfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err != nil {
-		t.Fatalf("loading kubeconfig: %v", err)
-	}
-	c, err := client.New(restCfg, client.Options{Scheme: machineScheme()})
-	if err != nil {
-		t.Fatalf("building machine client: %v", err)
-	}
+	restCfg := liveRESTConfig(t)
 
 	s := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(s)
@@ -100,7 +89,21 @@ func liveRouterNodes(t *testing.T) ([]platform.RouterNode, client.Client) {
 		}
 		out = append(out, rn)
 	}
-	return out, c
+	return out
+}
+
+// liveRESTConfig loads the kubeconfig the live tests read the cluster through.
+func liveRESTConfig(t *testing.T) *rest.Config {
+	t.Helper()
+	kubeconfig := os.Getenv("KUBECONFIG")
+	if kubeconfig == "" {
+		t.Skip("KUBECONFIG must be set")
+	}
+	restCfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		t.Fatalf("loading kubeconfig: %v", err)
+	}
+	return restCfg
 }
 
 // TestGCPLive_ReconcileNodes drives the operator's half against real GCP and
@@ -109,7 +112,7 @@ func TestGCPLive_ReconcileNodes(t *testing.T) {
 	cfg := liveReconcileConfig(t)
 	ctx := context.Background()
 
-	nodes, k8s := liveRouterNodes(t)
+	nodes := liveRouterNodes(t)
 	t.Logf("router nodes: %d", len(nodes))
 	for _, n := range nodes {
 		t.Logf("  %s %s %s", n.Name, n.Zone, n.PrivateIP)
@@ -123,7 +126,7 @@ func TestGCPLive_ReconcileNodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ncc client: %v", err)
 	}
-	p := NewWithClients(cfg, computeClient, nccClient, k8s)
+	p := NewWithClients(cfg, computeClient, nccClient)
 
 	if err := p.ReconcileNodes(ctx, nodes); err != nil {
 		t.Fatalf("ReconcileNodes: %v", err)

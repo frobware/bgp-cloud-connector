@@ -3,6 +3,7 @@ kind: CUDNBgpConfig
 metadata:
   name: cluster
 spec:
+  platform: AWS
   bgp:
     localASN: 65001                  # terraform output rosa_bgp_asn
     livenessDetection: bgp-keepalive # bfd | bgp-keepalive (default)

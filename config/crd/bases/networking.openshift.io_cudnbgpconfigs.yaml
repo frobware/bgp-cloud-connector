@@ -45,6 +45,20 @@ spec:
           metadata:
             type: object
           spec:
+            description: |-
+              The cloud block and the platform have to agree in both directions: naming a
+              platform without its block leaves the operator nothing to work from, and a
+              block without its platform is configuration that will never be read. Saying
+              it in CEL means the API server refuses it, rather than the operator
+              discovering it at reconcile and reporting Degraded.
+
+              peerGroups is the counterpart for Manual, which has no cloud to discover
+              from and so must declare its neighbours, and must not declare them on any
+              other platform, where they would silently lose to what was discovered.
+
+              This replaces a pair of rules phrased around spec.aws being present or
+              absent, which said the same thing for one cloud and had no way to say it for
+              a second.
             properties:
               aws:
                 properties:
@@ -111,21 +125,37 @@ spec:
                 required:
                 - localASN
                 type: object
+              platform:
+                description: |-
+                  PlatformType selects which cloud the operator reconciles BGP peering
+                  against. It is the discriminator for the cloud-specific block in the spec.
+
+                  Values are added only alongside a working implementation, so that an
+                  unsupported cloud is refused at admission rather than accepted and then
+                  failing at reconcile.
+                enum:
+                - AWS
+                - Manual
+                type: string
               routerNodeSelector:
                 additionalProperties:
                   type: string
                 type: object
             required:
             - bgp
+            - platform
             - routerNodeSelector
             type: object
             x-kubernetes-validations:
-            - message: spec.aws and spec.bgp.peerGroups are mutually exclusive
-              rule: '!(has(self.aws) && has(self.bgp.peerGroups) && size(self.bgp.peerGroups)
-                > 0)'
-            - message: spec.bgp.peerGroups is required when spec.aws is not configured
-              rule: has(self.aws) || (has(self.bgp.peerGroups) && size(self.bgp.peerGroups)
+            - message: spec.aws must be set when spec.platform is AWS, and must be
+                absent otherwise
+              rule: (self.platform == 'AWS') == has(self.aws)
+            - message: spec.bgp.peerGroups is required when spec.platform is Manual
+              rule: self.platform != 'Manual' || (has(self.bgp.peerGroups) && size(self.bgp.peerGroups)
                 > 0)
+            - message: spec.bgp.peerGroups may only be set when spec.platform is Manual
+              rule: self.platform == 'Manual' || !has(self.bgp.peerGroups) || size(self.bgp.peerGroups)
+                == 0
           status:
             properties:
               conditions:

@@ -63,6 +63,7 @@ func newReadyCUDNBgpConfig() *networkingv1alpha1.CUDNBgpConfig {
 	return &networkingv1alpha1.CUDNBgpConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cluster"},
 		Spec: networkingv1alpha1.CUDNBgpConfigSpec{
+			Platform: networkingv1alpha1.PlatformManual,
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,

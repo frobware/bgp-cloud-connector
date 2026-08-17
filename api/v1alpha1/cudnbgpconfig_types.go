@@ -38,6 +38,30 @@ const (
 	PhaseDegraded    PhaseType = "Degraded"
 )
 
+// PlatformType selects which cloud the operator reconciles BGP peering
+// against. It is the discriminator for the cloud-specific block in the spec.
+//
+// Values are added only alongside a working implementation, so that an
+// unsupported cloud is refused at admission rather than accepted and then
+// failing at reconcile.
+// +kubebuilder:validation:Enum=AWS;Manual
+type PlatformType string
+
+// AllPlatforms is every value the enum above accepts. The dispatch test walks
+// it, so a value added to the marker and forgotten here, or added to both and
+// never given a builder, fails rather than surfacing as "no platform
+// implementation" at runtime on a live cluster.
+var AllPlatforms = []PlatformType{PlatformAWS, PlatformManual}
+
+const (
+	// PlatformAWS discovers BGP neighbours from VPC Route Server endpoints and
+	// reconciles Route Server peers and source/dest check. Requires spec.aws.
+	PlatformAWS PlatformType = "AWS"
+	// PlatformManual performs no cloud reconciliation. BGP neighbours are
+	// taken from spec.bgp.peerGroups.
+	PlatformManual PlatformType = "Manual"
+)
+
 const (
 	ConditionNetworkOperatorPatched = "NetworkOperatorPatched"
 	ConditionFRRNamespaceReady      = "FRRNamespaceReady"
@@ -106,12 +130,28 @@ type BGPConfig struct {
 	PeerGroups []PeerGroup `json:"peerGroups,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="!(has(self.aws) && has(self.bgp.peerGroups) && size(self.bgp.peerGroups) > 0)",message="spec.aws and spec.bgp.peerGroups are mutually exclusive"
-// +kubebuilder:validation:XValidation:rule="has(self.aws) || (has(self.bgp.peerGroups) && size(self.bgp.peerGroups) > 0)",message="spec.bgp.peerGroups is required when spec.aws is not configured"
+// The cloud block and the platform have to agree in both directions: naming a
+// platform without its block leaves the operator nothing to work from, and a
+// block without its platform is configuration that will never be read. Saying
+// it in CEL means the API server refuses it, rather than the operator
+// discovering it at reconcile and reporting Degraded.
+//
+// peerGroups is the counterpart for Manual, which has no cloud to discover
+// from and so must declare its neighbours, and must not declare them on any
+// other platform, where they would silently lose to what was discovered.
+//
+// This replaces a pair of rules phrased around spec.aws being present or
+// absent, which said the same thing for one cloud and had no way to say it for
+// a second.
+// +kubebuilder:validation:XValidation:rule="(self.platform == 'AWS') == has(self.aws)",message="spec.aws must be set when spec.platform is AWS, and must be absent otherwise"
+// +kubebuilder:validation:XValidation:rule="self.platform != 'Manual' || (has(self.bgp.peerGroups) && size(self.bgp.peerGroups) > 0)",message="spec.bgp.peerGroups is required when spec.platform is Manual"
+// +kubebuilder:validation:XValidation:rule="self.platform == 'Manual' || !has(self.bgp.peerGroups) || size(self.bgp.peerGroups) == 0",message="spec.bgp.peerGroups may only be set when spec.platform is Manual"
 type CUDNBgpConfigSpec struct {
+	Platform           PlatformType      `json:"platform"`
 	BGP                BGPConfig         `json:"bgp"`
 	RouterNodeSelector map[string]string `json:"routerNodeSelector"`
-	AWS                *AWSConfig        `json:"aws,omitempty"`
+	// +optional
+	AWS *AWSConfig `json:"aws,omitempty"`
 }
 
 type CUDNBgpConfigStatus struct {

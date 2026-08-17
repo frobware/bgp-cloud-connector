@@ -115,6 +115,7 @@ func goldenConfig(liveness networkingv1alpha1.LivenessDetectionType) *networking
 	return &networkingv1alpha1.CUDNBgpConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: SingletonName},
 		Spec: networkingv1alpha1.CUDNBgpConfigSpec{
+			Platform: networkingv1alpha1.PlatformManual,
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: liveness,
@@ -182,6 +183,7 @@ func TestFRRGolden_FromDiscovery(t *testing.T) {
 	config := &networkingv1alpha1.CUDNBgpConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: SingletonName},
 		Spec: networkingv1alpha1.CUDNBgpConfigSpec{
+			Platform: networkingv1alpha1.PlatformAWS,
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,

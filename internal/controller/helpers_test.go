@@ -75,6 +75,7 @@ func TestEnsureFRRConfigurations_BFDProfile(t *testing.T) {
 
 	config := &networkingv1alpha1.CUDNBgpConfig{
 		Spec: networkingv1alpha1.CUDNBgpConfigSpec{
+			Platform: networkingv1alpha1.PlatformManual,
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBFD,
@@ -137,6 +138,7 @@ func TestEnsureFRRConfigurations_PrunesStale(t *testing.T) {
 
 	config := &networkingv1alpha1.CUDNBgpConfig{
 		Spec: networkingv1alpha1.CUDNBgpConfigSpec{
+			Platform: networkingv1alpha1.PlatformManual,
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,
@@ -194,6 +196,7 @@ func TestEnsureFRRConfigurations_KeepsUnmanagedResources(t *testing.T) {
 
 	config := &networkingv1alpha1.CUDNBgpConfig{
 		Spec: networkingv1alpha1.CUDNBgpConfigSpec{
+			Platform: networkingv1alpha1.PlatformManual,
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,

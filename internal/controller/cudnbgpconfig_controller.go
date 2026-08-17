@@ -145,7 +145,7 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// Build the cloud platform once if configured (used in Phases 3 and 5)
 	var awsPlatform platform.CloudPlatform
 	var discoveryResult *platform.DiscoveryResult
-	if config.Spec.AWS != nil {
+	if config.Spec.Platform != networkingv1alpha1.PlatformManual {
 		buildPlatform := r.PlatformBuilder
 		if buildPlatform == nil {
 			buildPlatform = defaultPlatformBuilder
@@ -182,7 +182,7 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// Phase 4: Apply FRR Configuration per AZ
 	log.Info("Phase 4: applying FRR configurations")
 	var frrCount int
-	if config.Spec.AWS != nil && discoveryResult != nil {
+	if discoveryResult != nil {
 		frrCount, err = EnsureFRRConfigurationsFromGroups(ctx, r.Client, config, discoveryResult.PeerGroups)
 	} else {
 		frrCount = len(config.Spec.BGP.PeerGroups)
@@ -254,7 +254,19 @@ func peerGroupsToStatus(groups []platform.PeerGroup) []networkingv1alpha1.PeerGr
 	return out
 }
 
+// defaultPlatformBuilder constructs the cloud platform named by spec.platform.
+// PlatformManual never reaches here: the controller skips platform
+// construction entirely for it.
 func defaultPlatformBuilder(ctx context.Context, c client.Client, config *networkingv1alpha1.CUDNBgpConfig) (platform.CloudPlatform, error) {
+	switch config.Spec.Platform {
+	case networkingv1alpha1.PlatformAWS:
+		return buildAWSPlatform(ctx, c, config)
+	default:
+		return nil, fmt.Errorf("no platform implementation for %q", config.Spec.Platform)
+	}
+}
+
+func buildAWSPlatform(ctx context.Context, c client.Client, config *networkingv1alpha1.CUDNBgpConfig) (platform.CloudPlatform, error) {
 	awsSpec := config.Spec.AWS
 
 	clusterID, err := getInfrastructureName(ctx, c)
@@ -338,7 +350,7 @@ func (r *CUDNBgpConfigReconciler) reconcileDelete(ctx context.Context, config *n
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	if config.Spec.AWS != nil {
+	if config.Spec.Platform != networkingv1alpha1.PlatformManual {
 		log.Info("cleaning up cloud resources")
 		buildPlatform := r.PlatformBuilder
 		if buildPlatform == nil {

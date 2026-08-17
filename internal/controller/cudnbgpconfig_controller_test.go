@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,6 +57,7 @@ func newTestCUDNBgpConfig() *networkingv1alpha1.CUDNBgpConfig {
 			Name: "cluster",
 		},
 		Spec: networkingv1alpha1.CUDNBgpConfigSpec{
+			Platform: networkingv1alpha1.PlatformManual,
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,
@@ -234,6 +236,7 @@ func newTestCUDNBgpConfigWithAWS() *networkingv1alpha1.CUDNBgpConfig {
 			Name: "cluster",
 		},
 		Spec: networkingv1alpha1.CUDNBgpConfigSpec{
+			Platform: networkingv1alpha1.PlatformAWS,
 			BGP: networkingv1alpha1.BGPConfig{
 				LocalASN:          65001,
 				LivenessDetection: networkingv1alpha1.LivenessDetectionBGPKeepalive,
@@ -670,5 +673,49 @@ func TestConfigReconcile_DeleteSuccessful(t *testing.T) {
 		if f == ConfigFinalizerName {
 			t.Error("finalizer should be removed after successful deletion")
 		}
+	}
+}
+
+// TestDefaultPlatformBuilder_EveryEnumValueDispatches walks the enum itself
+// rather than a list maintained beside it.
+//
+// A value added to the API and never given a builder is the failure this
+// exists for: every other test injects a fake through PlatformBuilder and
+// never reaches this switch, so a missing arm compiles, passes and then fails
+// on a cluster with "no platform implementation".
+//
+// An error is expected here rather than a platform, because building one reads
+// Infrastructure/cluster and the fake client has none. What must not happen is
+// falling through to the default arm.
+func TestDefaultPlatformBuilder_EveryEnumValueDispatches(t *testing.T) {
+	for _, p := range networkingv1alpha1.AllPlatforms {
+		if p == networkingv1alpha1.PlatformManual {
+			continue // Manual builds no platform by design.
+		}
+		t.Run(string(p), func(t *testing.T) {
+			config := newTestCUDNBgpConfigWithAWS()
+			config.Spec.Platform = p
+			c := fake.NewClientBuilder().WithScheme(configTestScheme()).Build()
+
+			_, err := defaultPlatformBuilder(context.Background(), c, config)
+			if err == nil {
+				return // dispatched and built, which is more than this asks
+			}
+			if strings.Contains(err.Error(), "no platform implementation") {
+				t.Errorf("%s reached the default arm: %v", p, err)
+			}
+		})
+	}
+}
+
+// TestDefaultPlatformBuilder_UnknownPlatform pins what the default arm is for.
+func TestDefaultPlatformBuilder_UnknownPlatform(t *testing.T) {
+	config := newTestCUDNBgpConfigWithAWS()
+	config.Spec.Platform = networkingv1alpha1.PlatformType("Nowhere")
+	c := fake.NewClientBuilder().WithScheme(configTestScheme()).Build()
+
+	_, err := defaultPlatformBuilder(context.Background(), c, config)
+	if err == nil || !strings.Contains(err.Error(), "no platform implementation") {
+		t.Errorf("expected an unknown platform to be refused, got %v", err)
 	}
 }

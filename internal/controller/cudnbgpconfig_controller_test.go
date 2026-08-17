@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -739,5 +740,73 @@ func TestConfigReconcile_DeleteSuccessful(t *testing.T) {
 		if f == ConfigFinalizerName {
 			t.Error("finalizer should be removed after successful deletion")
 		}
+	}
+}
+
+// TestConfigReconcile_ManualReportsPeerGroups proves a Manual configuration
+// reports the plan it rendered, as every cloud does.
+//
+// Manual gets its plan from the spec rather than from discovery, but it still
+// renders it into FRRConfigurations, and status.peerGroups exists to say what
+// FRR was told to peer with. Reporting nothing leaves the one platform that
+// needs no credentials as the only one whose work is invisible.
+func TestConfigReconcile_ManualReportsPeerGroups(t *testing.T) {
+	config := newTestCUDNBgpConfig() // Platform: Manual
+	s := configTestScheme()
+
+	network := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "operator.openshift.io/v1",
+			"kind":       "Network",
+			"metadata":   map[string]interface{}{"name": "cluster"},
+			"spec":       map[string]interface{}{},
+		},
+	}
+	frrNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: FRRNamespace}}
+	frrPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "frr-k8s-pod",
+			Namespace: FRRNamespace,
+			Labels:    map[string]string{"app": "frr-k8s"},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(config, network, frrNS, frrPod).
+		WithStatusSubresource(config).
+		Build()
+
+	r := &CUDNBgpConfigReconciler{Client: c, Scheme: s}
+	ctx := context.Background()
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}}
+
+	_, _ = r.Reconcile(ctx, req)
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatalf("reconcile error: %v", err)
+	}
+
+	updated := &networkingv1alpha1.CUDNBgpConfig{}
+	if err := c.Get(ctx, types.NamespacedName{Name: "cluster"}, updated); err != nil {
+		t.Fatalf("failed to get config: %v", err)
+	}
+
+	if len(updated.Status.PeerGroups) != len(config.Spec.BGP.PeerGroups) {
+		t.Fatalf("expected %d peer group(s) in status, got %d",
+			len(config.Spec.BGP.PeerGroups), len(updated.Status.PeerGroups))
+	}
+
+	got := updated.Status.PeerGroups[0]
+	// The key is the group's position, which is what names the generated
+	// FRRConfiguration: group "1" produced cudn-bgp-1.
+	if got.Key != "1" {
+		t.Errorf("expected the first group to be keyed %q, got %q", "1", got.Key)
+	}
+	want := config.Spec.BGP.PeerGroups[0]
+	if !reflect.DeepEqual(got.NodeSelector, want.NodeSelector) {
+		t.Errorf("node selector: got %v, want %v", got.NodeSelector, want.NodeSelector)
+	}
+	if !reflect.DeepEqual(got.Neighbors, want.Neighbors) {
+		t.Errorf("neighbours: got %v, want %v", got.Neighbors, want.Neighbors)
 	}
 }

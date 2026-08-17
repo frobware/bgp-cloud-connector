@@ -270,8 +270,13 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if discoveryResult != nil {
 		frrCount, err = EnsureFRRConfigurationsFromGroups(ctx, r.Client, config, discoveryResult.PeerGroups)
 	} else {
-		frrCount = len(config.Spec.BGP.PeerGroups)
-		err = EnsureFRRConfigurations(ctx, r.Client, config)
+		// Manual takes its plan from the spec rather than from a cloud, but it
+		// renders the same groups into the same objects, so it reports them
+		// the same way. Otherwise the one platform needing no credentials is
+		// the only one whose work leaves no trace in status.
+		groups := peerGroupsFromSpec(config)
+		config.Status.PeerGroups = peerGroupsToStatus(groups)
+		frrCount, err = EnsureFRRConfigurationsFromGroups(ctx, r.Client, config, groups)
 	}
 	if err != nil {
 		return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionFRRConfigurationApplied,

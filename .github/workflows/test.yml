@@ -20,5 +20,8 @@ jobs:
       - name: Verify vendored dependencies
         run: make verify-vendor
 
+      - name: Verify the tag-gated live tests still compile
+        run: make verify-live-tests
+
       - name: Running Tests
         run: make test

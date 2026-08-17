@@ -113,6 +113,18 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+# Every live test sits behind a build tag, so the default build never compiles
+# it and a refactor can break one without anything going red. That is how
+# machineScheme, NewWithClients, step and observed all went stale at once.
+LIVE_TAGS ?= awslive gcplive clusterlive
+
+.PHONY: verify-live-tests
+verify-live-tests: ## Type-check the tag-gated live tests without running them.
+	@for tag in $(LIVE_TAGS); do \
+	    echo "go vet -tags $$tag ./..."; \
+	    go vet -tags $$tag ./... || exit 1; \
+	done
+
 .PHONY: test
 test: manifests generate fmt vet ## Run platform-independent unit tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./internal/controller/... ./api/... ./cmd/... -coverprofile cover.out

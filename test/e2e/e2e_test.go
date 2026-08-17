@@ -57,9 +57,16 @@ var _ = Describe("E2E", Ordered, func() {
 				g.Expect(cfg.Status.Phase).To(Equal(networkingv1alpha1.PhaseReady))
 			}).WithTimeout(reconcileTimeout).WithPolling(pollInterval).Should(Succeed())
 
+			By("capturing the peering plan the operator reported")
+			cfg := &networkingv1alpha1.CUDNBgpConfig{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configCR.Name}, cfg)).To(Succeed())
+			observedGroups = cfg.Status.PeerGroups
+			Expect(observedGroups).NotTo(BeEmpty(),
+				"a Ready configuration must report the peer groups it rendered")
+
 			By("verifying FRRConfigurations exist")
-			azCount := len(bgpConfig.Spec.BGP.PeerGroups)
-			for i := 1; i <= azCount; i++ {
+			groupCount := len(observedGroups)
+			for i := 1; i <= groupCount; i++ {
 				frrCfg := &unstructured.Unstructured{}
 				frrCfg.SetGroupVersionKind(frrConfigurationGVK)
 				Expect(k8sClient.Get(ctx, types.NamespacedName{
@@ -118,10 +125,10 @@ var _ = Describe("E2E", Ordered, func() {
 	// -----------------------------------------------------------
 	Context("E2E-02: FRRConfiguration deleted", func() {
 		It("should recreate FRRConfiguration and re-establish BGP sessions", func(ctx context.Context) {
-			azCount := len(bgpConfig.Spec.BGP.PeerGroups)
+			groupCount := len(observedGroups)
 
 			By("deleting operator-managed FRRConfigurations")
-			for i := 1; i <= azCount; i++ {
+			for i := 1; i <= groupCount; i++ {
 				frrCfg := &unstructured.Unstructured{}
 				frrCfg.SetGroupVersionKind(frrConfigurationGVK)
 				frrCfg.SetName(fmt.Sprintf("%s%d", frrConfigNamePrefix, i))
@@ -131,7 +138,7 @@ var _ = Describe("E2E", Ordered, func() {
 
 			By("waiting for operator to recreate FRRConfigurations")
 			Eventually(func(g Gomega) {
-				for i := 1; i <= azCount; i++ {
+				for i := 1; i <= groupCount; i++ {
 					frrCfg := &unstructured.Unstructured{}
 					frrCfg.SetGroupVersionKind(frrConfigurationGVK)
 					g.Expect(k8sClient.Get(ctx, types.NamespacedName{
@@ -245,8 +252,8 @@ var _ = Describe("E2E", Ordered, func() {
 			}).WithTimeout(reconcileTimeout).WithPolling(pollInterval).Should(Succeed())
 
 			By("verifying FRRConfigurations are deleted")
-			azCount := len(bgpConfig.Spec.BGP.PeerGroups)
-			for i := 1; i <= azCount; i++ {
+			groupCount := len(observedGroups)
+			for i := 1; i <= groupCount; i++ {
 				frrCfg := &unstructured.Unstructured{}
 				frrCfg.SetGroupVersionKind(frrConfigurationGVK)
 				err := k8sClient.Get(ctx, types.NamespacedName{
@@ -273,8 +280,8 @@ var _ = Describe("E2E", Ordered, func() {
 
 func assertBGPNotEstablished(ctx context.Context) {
 	neighborAddrs := make(map[string]bool)
-	for _, az := range bgpConfig.Spec.BGP.PeerGroups {
-		for _, n := range az.Neighbors {
+	for _, pg := range observedGroups {
+		for _, n := range pg.Neighbors {
 			neighborAddrs[n.Address] = true
 		}
 	}
@@ -323,8 +330,8 @@ func assertBGPEstablished(ctx context.Context) {
 	Expect(nodes).NotTo(BeEmpty(), "expected at least 1 router node")
 
 	neighborAddrs := make(map[string]bool)
-	for _, az := range bgpConfig.Spec.BGP.PeerGroups {
-		for _, n := range az.Neighbors {
+	for _, pg := range observedGroups {
+		for _, n := range pg.Neighbors {
 			neighborAddrs[n.Address] = true
 		}
 	}

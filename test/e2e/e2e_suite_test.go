@@ -53,6 +53,17 @@ var (
 	k8sClient  client.Client
 	bgpConfig  *networkingv1alpha1.CUDNBgpConfig
 	bgpRouting *networkingv1alpha1.CUDNBgpRouting
+
+	// observedGroups is the peering plan the operator reported once the
+	// configuration reached Ready, captured by E2E-01 and read by everything
+	// after it.
+	//
+	// It comes from status rather than from the manifest, which is what lets
+	// this suite run on any platform: on a cloud the plan is discovered and
+	// the manifest does not contain it, and only the operator can say what it
+	// found. It is remembered rather than re-read because the last test
+	// deletes the configuration and then asserts on what used to exist.
+	observedGroups []networkingv1alpha1.PeerGroupStatus
 )
 
 var (
@@ -86,9 +97,6 @@ var _ = BeforeSuite(func() {
 	By("loading CUDNBgpConfig manifest from profile " + profile)
 	bgpConfig = &networkingv1alpha1.CUDNBgpConfig{}
 	loadManifest(filepath.Join(manifestDir, "cudnbgpconfig.yaml"), bgpConfig)
-	Expect(bgpConfig.Spec.AWS).To(BeNil(), "shared E2E profile must not have spec.aws")
-	Expect(bgpConfig.Spec.BGP.PeerGroups).NotTo(BeEmpty(),
-		"shared E2E profile must have spec.bgp.peerGroups")
 
 	By("loading CUDNBgpRouting manifest from profile " + profile)
 	bgpRouting = &networkingv1alpha1.CUDNBgpRouting{}

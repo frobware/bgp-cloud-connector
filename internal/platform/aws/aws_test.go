@@ -942,3 +942,137 @@ func TestCleanup_DeletesManagedPeerOnPage2(t *testing.T) {
 		t.Errorf("expected delete of peer-ep-a1, got %s", aws.ToString(mock.deletePeerCalls[0].RouteServerPeerId))
 	}
 }
+
+// TestCleanup_SkipsPeersAlreadyGoing pins the state check that stops a delete
+// wedging the finalizer.
+//
+// EC2 keeps returning a peer after it has been deleted, and refuses a delete on
+// one that is already deleting or deleted with IncorrectState. Cleanup runs on
+// the delete path, so an error there is not merely untidy: it propagates, the
+// finalizer is never released, and the CUDNBgpConfig stays terminating for
+// ever, retrying. Measured on a live cluster at over ten minutes, freed only
+// by removing the finalizer by hand.
+func TestCleanup_SkipsPeersAlreadyGoing(t *testing.T) {
+	managedTag := []ec2types.Tag{{Key: aws.String("managed-by"), Value: aws.String("cudn-bgp-routing-operator/test-cluster")}}
+	mock := &mockEC2{
+		describePeersFunc: func(_ *ec2.DescribeRouteServerPeersInput) (*ec2.DescribeRouteServerPeersOutput, error) {
+			return &ec2.DescribeRouteServerPeersOutput{
+				RouteServerPeers: []ec2types.RouteServerPeer{
+					{PeerAddress: aws.String("10.0.0.1"), RouteServerPeerId: aws.String("peer-live"), RouteServerEndpointId: aws.String("ep-a1"),
+						State: ec2types.RouteServerPeerStateAvailable, Tags: managedTag},
+					{PeerAddress: aws.String("10.0.0.2"), RouteServerPeerId: aws.String("peer-deleting"), RouteServerEndpointId: aws.String("ep-a2"),
+						State: ec2types.RouteServerPeerStateDeleting, Tags: managedTag},
+					{PeerAddress: aws.String("10.0.0.3"), RouteServerPeerId: aws.String("peer-deleted"), RouteServerEndpointId: aws.String("ep-b1"),
+						State: ec2types.RouteServerPeerStateDeleted, Tags: managedTag},
+				},
+			}, nil
+		},
+	}
+	p := newTestPlatform(mock)
+
+	if err := p.Cleanup(context.Background()); err != nil {
+		t.Fatalf("cleanup should not fail on peers already going: %v", err)
+	}
+
+	var deleted []string
+	for _, call := range mock.deletePeerCalls {
+		deleted = append(deleted, aws.ToString(call.RouteServerPeerId))
+	}
+	for _, id := range deleted {
+		if id == "peer-deleting" || id == "peer-deleted" {
+			t.Errorf("reissued a delete for %s, which EC2 refuses with IncorrectState", id)
+		}
+	}
+	if len(deleted) != 1 || deleted[0] != "peer-live" {
+		t.Errorf("expected only peer-live to be deleted, got %v", deleted)
+	}
+}
+
+// TestReconcilePeers_SkipsPruningPeersAlreadyGoing is the same state check on
+// the reconcile path. A peer for a node that has gone is pruned, and pruning
+// one that EC2 is already removing fails the whole reconcile with
+// IncorrectState, so no other node is reconciled either.
+func TestReconcilePeers_SkipsPruningPeersAlreadyGoing(t *testing.T) {
+	managedTag := []ec2types.Tag{{Key: aws.String("managed-by"), Value: aws.String("cudn-bgp-routing-operator/test-cluster")}}
+	mock := &mockEC2{
+		describePeersFunc: func(_ *ec2.DescribeRouteServerPeersInput) (*ec2.DescribeRouteServerPeersOutput, error) {
+			return &ec2.DescribeRouteServerPeersOutput{
+				RouteServerPeers: []ec2types.RouteServerPeer{
+					// Both are for nodes no longer present, so both are stale.
+					{PeerAddress: aws.String("10.0.9.9"), RouteServerPeerId: aws.String("peer-stale"), RouteServerEndpointId: aws.String("ep-a1"),
+						State: ec2types.RouteServerPeerStateAvailable, Tags: managedTag},
+					{PeerAddress: aws.String("10.0.9.8"), RouteServerPeerId: aws.String("peer-stale-going"), RouteServerEndpointId: aws.String("ep-a2"),
+						State: ec2types.RouteServerPeerStateDeleting, Tags: managedTag},
+				},
+			}, nil
+		},
+	}
+	p := &Platform{
+		ec2Client:     mock,
+		endpointsByAZ: map[string][]string{"us-east-1a": {"ep-a1", "ep-a2"}},
+		localASN:      65001,
+		clusterID:     "test-cluster",
+	}
+
+	if err := p.reconcileRouteServerPeers(context.Background(), nil); err != nil {
+		t.Fatalf("reconcile should not fail on a peer already going: %v", err)
+	}
+
+	var deleted []string
+	for _, call := range mock.deletePeerCalls {
+		deleted = append(deleted, aws.ToString(call.RouteServerPeerId))
+	}
+	if len(deleted) != 1 || deleted[0] != "peer-stale" {
+		t.Errorf("expected only peer-stale to be pruned, got %v", deleted)
+	}
+}
+
+// TestReconcilePeers_RecreatesOverADeletedPeer pins the difference between a
+// peer that is going and one that has gone.
+//
+// EC2 keeps returning a peer after it is deleted. A deleted peer holds no
+// address, so it must not count as one already existing, or the operator never
+// replaces a peer that was removed out from under it and drift is never
+// repaired. A deleting peer does still hold its address, so it does count, and
+// the replacement waits for the next pass.
+func TestReconcilePeers_RecreatesOverADeletedPeer(t *testing.T) {
+	managedTag := []ec2types.Tag{{Key: aws.String("managed-by"), Value: aws.String("cudn-bgp-routing-operator/test-cluster")}}
+	mock := &mockEC2{
+		describePeersFunc: func(_ *ec2.DescribeRouteServerPeersInput) (*ec2.DescribeRouteServerPeersOutput, error) {
+			return &ec2.DescribeRouteServerPeersOutput{
+				RouteServerPeers: []ec2types.RouteServerPeer{
+					{PeerAddress: aws.String("10.0.1.10"), RouteServerPeerId: aws.String("peer-gone"), RouteServerEndpointId: aws.String("ep-a1"),
+						State: ec2types.RouteServerPeerStateDeleted, Tags: managedTag},
+					{PeerAddress: aws.String("10.0.1.10"), RouteServerPeerId: aws.String("peer-going"), RouteServerEndpointId: aws.String("ep-a2"),
+						State: ec2types.RouteServerPeerStateDeleting, Tags: managedTag},
+				},
+			}, nil
+		},
+	}
+	p := &Platform{
+		ec2Client:     mock,
+		endpointsByAZ: map[string][]string{"us-east-1a": {"ep-a1", "ep-a2"}},
+		localASN:      65001,
+		clusterID:     "test-cluster",
+	}
+	nodes := []platform.RouterNode{
+		{Name: "node-a", PrivateIP: "10.0.1.10", AZ: "us-east-1a", ProviderID: "aws:///us-east-1a/i-a"},
+	}
+
+	if err := p.reconcileRouteServerPeers(context.Background(), nodes); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// ep-a1's peer is gone, so the node needs a new one there. ep-a2's is
+	// still on its way out and holds the address, so nothing is created yet.
+	var createdOn []string
+	for _, call := range mock.createPeerCalls {
+		createdOn = append(createdOn, aws.ToString(call.RouteServerEndpointId))
+	}
+	if len(createdOn) != 1 || createdOn[0] != "ep-a1" {
+		t.Errorf("expected one peer created on ep-a1, got %v", createdOn)
+	}
+	if len(mock.deletePeerCalls) != 0 {
+		t.Errorf("expected no deletes, got %d", len(mock.deletePeerCalls))
+	}
+}

@@ -47,6 +47,12 @@ type Config struct {
 	LocalASN          int64
 	LivenessDetection string
 	ClusterID         string
+
+	// Credentials is what the caller resolved with ResolveCredentials.
+	// It is required: leaving the SDK to find credentials by itself is
+	// exactly the behaviour that fails silently on a cluster where the
+	// pod has none.
+	Credentials aws.CredentialsProvider
 }
 
 func New(ctx context.Context, cfg Config) (*Platform, error) {
@@ -63,6 +69,7 @@ func newPlatform(ctx context.Context, cfg Config, ec2Override ec2API, stsOverrid
 	} else {
 		awsCfg, err := config.LoadDefaultConfig(ctx,
 			config.WithRegion(cfg.Region),
+			config.WithCredentialsProvider(cfg.Credentials),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("loading AWS config: %w", err)

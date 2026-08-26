@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"reflect"
@@ -58,6 +59,8 @@ import (
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=infrastructures,verbs=get
+// +kubebuilder:rbac:groups=cloudcredential.openshift.io,resources=credentialsrequests,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch,namespace=openshift-cudn-bgp-routing
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=create;delete;update;patch
 
 type PlatformBuilderFunc func(ctx context.Context, c client.Client, config *networkingv1alpha1.CUDNBgpConfig) (platform.CloudPlatform, error)
@@ -153,6 +156,26 @@ func (r *CUDNBgpConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		p, err := buildPlatform(ctx, r.Client, config)
 		if err != nil {
+			// Asking the cluster to mint credentials and waiting for it
+			// is not a fault, and is reported like Phase 2's wait rather
+			// than through setDegraded.
+			if errors.Is(err, platform.ErrCredentialsPending) {
+				if err := r.patchConfigStatus(ctx, config, *baselineStatus, func(c *networkingv1alpha1.CUDNBgpConfig) {
+					c.Status.Phase = networkingv1alpha1.PhaseConfiguring
+					c.Status.ObservedGeneration = c.Generation
+					meta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
+						Type:               networkingv1alpha1.ConditionCloudEndpointsDiscovered,
+						Status:             metav1.ConditionFalse,
+						Reason:             "WaitingForCloudCredentials",
+						Message:            "Waiting for the cluster to provide cloud credentials",
+						ObservedGeneration: c.Generation,
+					})
+				}); err != nil {
+					return ctrl.Result{}, err
+				}
+				log.Info("cloud credentials not available yet, requeueing")
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			}
 			var credErr *platform.CredentialError
 			if errors.As(err, &credErr) {
 				return r.setDegraded(ctx, config, *baselineStatus, networkingv1alpha1.ConditionCloudEndpointsDiscovered,
@@ -277,12 +300,20 @@ func buildAWSPlatform(ctx context.Context, c client.Client, config *networkingv1
 		return nil, fmt.Errorf("reading cluster infrastructure name: %w", err)
 	}
 
+	// May report platform.ErrCredentialsPending, which Reconcile waits
+	// out rather than treating as a fault.
+	creds, err := awsplatform.ResolveCredentials(ctx, c, operatorNamespace(), awsSpec.Region)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := awsplatform.Config{
 		Region:            awsSpec.Region,
 		RouteServerIDs:    awsSpec.RouteServerIDs,
 		LocalASN:          config.Spec.BGP.LocalASN,
 		LivenessDetection: string(config.Spec.BGP.LivenessDetection),
 		ClusterID:         clusterID,
+		Credentials:       creds,
 	}
 
 	return awsplatform.New(ctx, cfg)
@@ -309,6 +340,17 @@ func buildGCPPlatform(ctx context.Context, c client.Client, config *networkingv1
 	}
 
 	return gcpplatform.New(ctx, cfg)
+}
+
+// operatorNamespace is where the operator is running, which is where the
+// cloud credential operator will put the secret it mints. OLM can install
+// into a namespace of the administrator's choosing, so the Deployment
+// passes it down; the constant covers running the manager from a desk.
+func operatorNamespace() string {
+	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+		return ns
+	}
+	return DefaultOperatorNamespace
 }
 
 func getInfrastructureName(ctx context.Context, c client.Client) (string, error) {

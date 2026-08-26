@@ -24,11 +24,14 @@ const (
 
 	ConditionDeletionBlocked = "DeletionBlocked"
 
-	SingletonName          = "cluster"
-	FRRNamespace           = "openshift-frr-k8s"
-	FRRConfigNamePrefix    = "cudn-bgp-"
-	CUDNNamePrefix         = "cluster-udn-"
-	RouteAdvertisementName = "cudn-bgp-route-advertisements"
+	SingletonName = "cluster"
+	FRRNamespace  = "openshift-frr-k8s"
+	// DefaultOperatorNamespace is where the operator runs unless the
+	// Deployment says otherwise through POD_NAMESPACE.
+	DefaultOperatorNamespace = "openshift-cudn-bgp-routing"
+	FRRConfigNamePrefix      = "cudn-bgp-"
+	CUDNNamePrefix           = "cluster-udn-"
+	RouteAdvertisementName   = "cudn-bgp-route-advertisements"
 
 	// RawFRRConfigPriority orders this raw block against the raw blocks of
 	// other FRRConfigurations, a higher value being appended later. It says

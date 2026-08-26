@@ -1,6 +1,9 @@
 package platform
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // RouterNode is a node the cloud will peer with.
 type RouterNode struct {
@@ -48,6 +51,13 @@ type PeerGroup struct {
 type DiscoveryResult struct {
 	PeerGroups []PeerGroup
 }
+
+// ErrCredentialsPending reports that the cluster has been asked for cloud
+// credentials and has not produced them yet. It lives beside
+// CredentialError for the same reason, and it is deliberately distinct
+// from one: waiting for a mint is not a fault, and the controller waits
+// it out rather than reporting the operator degraded.
+var ErrCredentialsPending = errors.New("waiting for the cluster to provide cloud credentials")
 
 // CredentialError reports that a platform could not authenticate against its
 // cloud. It lives here rather than in one provider's package because the

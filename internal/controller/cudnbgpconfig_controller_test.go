@@ -457,6 +457,68 @@ func TestConfigReconcile_AWSDiscoveryFailure(t *testing.T) {
 	t.Error("CloudEndpointsDiscovered condition not found")
 }
 
+// Credentials that have been asked for and not yet minted are a wait,
+// not a fault: CCO takes a few seconds, and reporting the operator
+// Degraded in that window sends people looking for a problem that is
+// about to solve itself.
+func TestConfigReconcile_CredentialsPendingIsAWait(t *testing.T) {
+	config := newTestCUDNBgpConfigWithAWS()
+	config.Finalizers = []string{ConfigFinalizerName}
+	s := configTestScheme()
+
+	network := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "operator.openshift.io/v1",
+			"kind":       "Network",
+			"metadata":   map[string]interface{}{"name": "cluster"},
+			"spec":       map[string]interface{}{},
+		},
+	}
+	frrNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: FRRNamespace}}
+	frrPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "frr-k8s-pod", Namespace: FRRNamespace, Labels: map[string]string{"app": "frr-k8s"}},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(config, network, frrNS, frrPod).
+		WithStatusSubresource(config).
+		Build()
+
+	r := &CUDNBgpConfigReconciler{
+		Client: c, Scheme: s,
+		PlatformBuilder: func(_ context.Context, _ client.Client, _ *networkingv1alpha1.CUDNBgpConfig) (platform.CloudPlatform, error) {
+			return nil, fmt.Errorf("resolving credentials: %w", platform.ErrCredentialsPending)
+		},
+	}
+
+	result, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}})
+	if err != nil {
+		t.Fatalf("expected no error while waiting, got %v", err)
+	}
+	if result.RequeueAfter != 10*time.Second {
+		t.Errorf("expected a 10s requeue, got %v", result.RequeueAfter)
+	}
+
+	updated := &networkingv1alpha1.CUDNBgpConfig{}
+	_ = c.Get(context.Background(), types.NamespacedName{Name: "cluster"}, updated)
+	if updated.Status.Phase == networkingv1alpha1.PhaseDegraded {
+		t.Errorf("expected %s, got Degraded", networkingv1alpha1.PhaseConfiguring)
+	}
+	for _, cond := range updated.Status.Conditions {
+		if cond.Type == networkingv1alpha1.ConditionCloudEndpointsDiscovered {
+			if cond.Status != metav1.ConditionFalse {
+				t.Errorf("expected CloudEndpointsDiscovered=False, got %s", cond.Status)
+			}
+			if cond.Reason != "WaitingForCloudCredentials" {
+				t.Errorf("expected reason WaitingForCloudCredentials, got %s", cond.Reason)
+			}
+			return
+		}
+	}
+	t.Error("CloudEndpointsDiscovered condition not found")
+}
+
 func TestConfigReconcile_AWSReconcileFailure(t *testing.T) {
 	mock := &mockPlatform{reconcileNodesErr: fmt.Errorf("ec2 API timeout")}
 	config := newTestCUDNBgpConfigWithAWS()

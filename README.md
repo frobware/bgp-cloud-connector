@@ -81,11 +81,17 @@ When AWS platform integration is configured, the operator performs additional ac
 
 Route Server peers are created **per-AZ** — each BGP-enabled worker node is peered with its local AZ's Route Server endpoints. Peers are tagged with `managed-by: cudn-bgp-routing-operator/<infrastructureName>` for lifecycle management, where `<infrastructureName>` is read automatically from the OpenShift `Infrastructure/cluster` object (`status.infrastructureName`). This cluster-scoped tag ensures multiple clusters sharing the same VPC Route Server do not interfere with each other's peers. If a peer already exists at a desired IP but was not created by the operator (e.g. created manually or by Terraform), the operator adopts it by adding the `managed-by` tag rather than attempting to create a duplicate.
 
-#### AWS authentication (IRSA)
+#### AWS authentication
 
-The operator authenticates to AWS using IAM Roles for Service Accounts (IRSA). ROSA HCP clusters have an OIDC provider pre-configured, so the operator's ServiceAccount can assume an IAM role directly — no static credentials or Secrets are needed.
+The operator gets its AWS credentials in one of two ways, and works out which by asking the AWS SDK whether the pod already has any.
 
-**The cluster admin must complete the following steps before creating the `CUDNBgpConfig` CR with `spec.aws`:**
+**Where the pod has credentials (ROSA, and any STS cluster).** ROSA HCP clusters have an OIDC provider pre-configured, so the operator's ServiceAccount can assume an IAM role directly: annotate the ServiceAccount, and the pod identity webhook injects a web identity token. Nothing static is stored, and the operator asks the cluster for nothing. The steps below set this up.
+
+**Where it does not (ordinary IPI).** The operator creates a `CredentialsRequest` named `cudn-bgp-routing-aws` for itself, carrying exactly the permissions in the table above, and uses the secret the cloud credential operator mints into its own namespace. There is nothing to set up: the `CUDNBgpConfig` reports `CloudEndpointsDiscovered=False` with reason `WaitingForCloudCredentials` for the few seconds this takes, then proceeds.
+
+If the cluster has an OIDC provider but the ServiceAccount is not annotated, neither path completes: the operator asks for credentials, and CCO does not mint on an STS cluster. Annotating the ServiceAccount is the fix.
+
+**For IRSA, the cluster admin must complete the following steps before creating the `CUDNBgpConfig` CR with `spec.aws`:**
 
 **Step 1 — Create an IAM role with a trust policy for the operator's ServiceAccount:**
 
@@ -632,7 +638,8 @@ Both CRs use the same phase enum. `CUDNBgpRouting` follows `Pending` → `Config
 |:---|:---|:---|
 | `NetworkOperatorPatched` | `PatchFailed` | Failed to patch `Network.operator.openshift.io/cluster` |
 | `FRRNamespaceReady` | `CheckFailed` | Error checking FRR readiness (distinct from simply waiting) |
-| `CloudEndpointsDiscovered` | `CloudCredentialsInvalid` | IRSA credentials not available or `sts:GetCallerIdentity` verification failed (check ServiceAccount annotation and IAM role trust policy) |
+| `CloudEndpointsDiscovered` | `CloudCredentialsInvalid` | Credentials were found but `sts:GetCallerIdentity` failed (check the IAM role trust policy, or the minted secret) |
+| `CloudEndpointsDiscovered` | `WaitingForCloudCredentials` | The cluster has been asked to mint credentials and has not yet. Not `Degraded`: the CR stays `Configuring` and requeues every 10 seconds |
 | `CloudEndpointsDiscovered` | `CloudDiscoveryFailed` | Failed to build the AWS platform client (e.g. Infrastructure name unavailable) or to discover Route Server endpoints (invalid Route Server ID, insufficient IAM permissions) |
 | `FRRConfigurationApplied` | `ApplyFailed` | Failed to create/update one or more FRRConfigurations |
 | `CloudResourcesReconciled` | `CloudReconcileFailed` | Failed to reconcile Route Server peers or disable source/dest check |
@@ -745,7 +752,7 @@ oc rollout restart deployment/openshift-cudn-bgp-routing-controller-manager -n o
 
 5. Create the CRs for your environment:
 
-   **For ROSA HCP:** provision AWS infrastructure first with [rosa-bgp Terraform](https://github.com/msemanrh/rosa-bgp), set up the IRSA IAM role (see [AWS authentication](#aws-authentication-irsa)), then create the CR with Route Server IDs and BGP ASN from `terraform output`. The operator auto-discovers all Route Server endpoints, neighbor IPs, and remote ASN:
+   **For ROSA HCP:** provision AWS infrastructure first with [rosa-bgp Terraform](https://github.com/msemanrh/rosa-bgp), set up the IRSA IAM role (see [AWS authentication](#aws-authentication)), then create the CR with Route Server IDs and BGP ASN from `terraform output`. The operator auto-discovers all Route Server endpoints, neighbor IPs, and remote ASN:
 
    ```bash
    $EDITOR config/samples/networking_v1alpha1_cudnbgpconfig.yaml # Add needed Terraform outputs

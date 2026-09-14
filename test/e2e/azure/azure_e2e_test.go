@@ -277,9 +277,83 @@ var _ = Describe("Azure E2E", Ordered, func() {
 	})
 
 	// ---------------------------------------------------------------
-	// E2E-AZURE-04: deletion order and cleanup
+	// E2E-AZURE-04: a node stops being a router, then becomes one again
 	// ---------------------------------------------------------------
-	Context("E2E-AZURE-04: Deletion cleanup", func() {
+	Context("E2E-AZURE-04: Router node leaves and rejoins the selector", func() {
+		It("should drop the peering for a node that leaves the router set, and rebuild it when the node returns", func(ctx context.Context) {
+			nodes, err := routerNodes(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			// Below two, taking one away empties the selector, and the
+			// operator reads an empty node list as a selector glitch
+			// rather than a request to release the estate. The spec
+			// would then pass with the operator having done nothing.
+			Expect(len(nodes)).To(BeNumerically(">=", 2),
+				"this spec needs at least two router nodes, so that removing one still leaves a router")
+
+			victim := nodes[0]
+			victimIP := nodeInternalIP(&victim)
+			Expect(victimIP).NotTo(BeEmpty(), "node %s has no internal address", victim.Name)
+
+			survivorIPs := make([]string, 0, len(nodes)-1)
+			for i := range nodes[1:] {
+				survivorIPs = append(survivorIPs, nodeInternalIP(&nodes[1:][i]))
+			}
+
+			By("removing the router labels from " + victim.Name)
+			unlabelRouterNode(ctx, victim.Name)
+			// Put back whatever happens below, so a failure here leaves
+			// the cluster as the cleanup spec and the next run expect to
+			// find it rather than one node short.
+			DeferCleanup(func(ctx context.Context) {
+				labelRouterNode(ctx, victim.Name)
+			})
+			// Nothing asks for a reconcile here. A label is a change
+			// the controller watches, and the configuration requeues
+			// every five minutes besides, so the operator reaches this
+			// on its own. Which of the two got it there is not
+			// something this spec can tell you.
+
+			By("waiting for its peering to go, and for the others to stay")
+			Eventually(func(g Gomega) {
+				current, listErr := managedPeerings(ctx)
+				g.Expect(listErr).NotTo(HaveOccurred())
+				ips := peeringIPs(current)
+				g.Expect(ips).NotTo(ContainElement(victimIP),
+					"the Route Server still peers %s, which is no longer a router node", victim.Name)
+				for _, ip := range survivorIPs {
+					g.Expect(ips).To(ContainElement(ip),
+						"unlabelling one node took the peering for %s with it", ip)
+				}
+			}).WithTimeout(peeringSettleTimeout).WithPolling(pollInterval).Should(Succeed())
+
+			By("putting the router labels back on " + victim.Name)
+			labelRouterNode(ctx, victim.Name)
+
+			By("waiting for the peering to come back")
+			Eventually(func(g Gomega) {
+				current, listErr := managedPeerings(ctx)
+				g.Expect(listErr).NotTo(HaveOccurred())
+				found := false
+				for _, p := range current {
+					if p.PeerIP == victimIP {
+						found = true
+						g.Expect(p.ProvisioningState).To(Equal("Succeeded"),
+							"peering %s for node %s is %s", p.Name, victim.Name, p.ProvisioningState)
+					}
+				}
+				g.Expect(found).To(BeTrue(),
+					"no peering came back for node %s at %s", victim.Name, victimIP)
+			}).WithTimeout(peeringSettleTimeout).WithPolling(pollInterval).Should(Succeed())
+
+			By("waiting for every router node to be Established again")
+			assertBGPEstablished(ctx)
+		})
+	})
+
+	// ---------------------------------------------------------------
+	// E2E-AZURE-05: deletion order and cleanup
+	// ---------------------------------------------------------------
+	Context("E2E-AZURE-05: Deletion cleanup", func() {
 		It("should block config deletion while routing exists, then remove every peering", func(ctx context.Context) {
 			By("attempting to delete the config CR while the routing CR still exists")
 			Expect(k8sClient.Delete(ctx, configCR)).To(Succeed())
@@ -320,6 +394,46 @@ var _ = Describe("Azure E2E", Ordered, func() {
 		})
 	})
 })
+
+// labelRouterNode and unlabelRouterNode move one node into and out of
+// the set the operator peers, by writing every label in the
+// configuration's router node selector.
+//
+// They read the selector rather than naming bgp_router, because the
+// profile a run is given is free to choose its own key and the operator
+// only ever sees the selector.
+func labelRouterNode(ctx context.Context, name string) {
+	patchRouterLabels(ctx, name, false)
+}
+
+func unlabelRouterNode(ctx context.Context, name string) {
+	patchRouterLabels(ctx, name, true)
+}
+
+func patchRouterLabels(ctx context.Context, name string, remove bool) {
+	node := &corev1.Node{}
+	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name}, node)).To(Succeed())
+	patch := client.MergeFrom(node.DeepCopy())
+	for k, v := range bgpConfig.Spec.RouterNodeSelector {
+		if remove {
+			delete(node.Labels, k)
+		} else {
+			node.Labels[k] = v
+		}
+	}
+	Expect(k8sClient.Patch(ctx, node, patch)).To(Succeed())
+}
+
+// peeringIPs is the set of node addresses the Route Server currently
+// peers, for assertions that care which nodes are there rather than what
+// each peering says.
+func peeringIPs(peerings []observedPeering) []string {
+	ips := make([]string, 0, len(peerings))
+	for _, p := range peerings {
+		ips = append(ips, p.PeerIP)
+	}
+	return ips
+}
 
 // assertBGPEstablished waits until every router node has a session in
 // Established to one of the addresses the operator discovered.

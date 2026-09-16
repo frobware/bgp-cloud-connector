@@ -11,8 +11,8 @@
 # across the cluster. Observed once, on OCP 5.0, taking a couple of
 # minutes end to end with co/network never leaving Degraded=False.
 #
-# It refuses while a CUDNBgpConfig exists, because the operator patches
-# the Network CR straight back during reconcile and you would be
+# It refuses while a BGPCloudConfiguration exists, because the operator
+# patches the Network CR straight back during reconcile and you would be
 # undoing this every thirty seconds without seeing why.
 
 set -euo pipefail
@@ -36,15 +36,38 @@ if ! oc whoami >/dev/null 2>&1; then
     exit 1
 fi
 
-configs="$(oc get cudnbgpconfig -o name 2>/dev/null | wc -l)"
+# A CRD that is not installed means no such resource can exist, which is
+# the ordinary case here: the operator's own CRDs are absent until
+# somebody runs make install. Any other failure is a failure to find
+# out, and must not read as none -- that is how a guard against an
+# existing CR passes while the API is unreachable, and the patch below
+# then fights the operator every thirty seconds. Both kinds are cluster
+# scoped.
+count_if_crd_present() {
+    local crd="$1" kind="$2" err
+    if ! err="$(oc get crd "$crd" 2>&1 >/dev/null)"; then
+        case "$err" in
+            *NotFound*) echo 0; return 0 ;;
+            *) echo "Error: cannot check for $crd" >&2
+               echo "$err" >&2
+               exit 1
+               ;;
+        esac
+    fi
+    oc get "$kind" -o name | wc -l
+}
+
+configs="$(count_if_crd_present \
+    bgpcloudconfigurations.networking.openshift.io bgpcloudconfiguration)"
 if [ "$configs" != "0" ]; then
-    echo "Error: $configs CUDNBgpConfig still exists" >&2
+    echo "Error: $configs BGPCloudConfiguration still exists" >&2
     echo "The operator re-applies the FRR patch on every reconcile, so this" >&2
     echo "would be undone immediately. Delete the CR first." >&2
     exit 1
 fi
 
-ras="$(oc get routeadvertisements.k8s.ovn.org -o name 2>/dev/null | wc -l)"
+ras="$(count_if_crd_present \
+    routeadvertisements.k8s.ovn.org routeadvertisements.k8s.ovn.org)"
 if [ "$ras" != "0" ]; then
     echo "Error: $ras RouteAdvertisements still exist" >&2
     echo "Remove them before disabling the feature that serves them." >&2

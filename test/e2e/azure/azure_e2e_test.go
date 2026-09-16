@@ -261,6 +261,7 @@ var _ = Describe("Azure E2E", Ordered, func() {
 
 			By("disabling enableIPForwarding on " + victim.Name)
 			Expect(setForwarding(ctx, nic, false)).To(Succeed())
+			nudge(ctx)
 
 			By("waiting for the operator to put it back")
 			// This is the failure that looks healthy: with forwarding
@@ -475,4 +476,29 @@ func assertBGPEstablished(ctx context.Context) {
 				"node %s has no Established session to the Route Server", n.Name)
 		}
 	}).WithTimeout(reconcileTimeout).WithPolling(pollInterval).Should(Succeed())
+}
+
+// nudge forces a reconcile now rather than waiting out the operator's
+// five-minute requeue.
+//
+// Drift on the Azure side raises no Kubernetes event, so nothing enqueues
+// the configuration until that timer fires, and a spec that perturbs the
+// cloud then waits spends most of its time watching a clock we set
+// ourselves. Writing an annotation is enough: the controller's For()
+// carries no predicate, so any update to the object enqueues.
+//
+// This does not weaken what is asserted. The spec that uses it is about
+// drift being repaired, not about how soon it is noticed, and E2E-AZURE-02
+// is deliberately left unnudged so that one of the two still proves the
+// operator gets there unprompted.
+func nudge(ctx context.Context) {
+	cfg := &networkingapi.BGPCloudConfiguration{}
+	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: bgpConfig.Name}, cfg)).To(Succeed())
+	annotations := cfg.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations["e2e.openshift.io/reconcile-requested-at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	cfg.SetAnnotations(annotations)
+	Expect(k8sClient.Update(ctx, cfg)).To(Succeed())
 }

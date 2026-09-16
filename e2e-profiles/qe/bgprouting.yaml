@@ -1,5 +1,5 @@
-apiVersion: networking.openshift.io/v1alpha1
-kind: CUDNBgpRouting
+apiVersion: networking.openshift.io/v1beta1
+kind: BGPRouting
 metadata:
   name: cudn1
 spec:

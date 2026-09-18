@@ -542,6 +542,27 @@ func capitalise(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
+// configOwnerReference names the singleton as the owner of an object
+// this controller creates on its behalf, so that deleting the
+// configuration takes the object with it. The configuration is cluster
+// scoped, which is what lets it own a namespaced object in a namespace
+// that is not its own -- the ban on crossing namespaces applies to
+// namespaced owners.
+//
+// blockOwnerDeletion is left unset deliberately: OpenShift enforces
+// ownerReferencesPermissionEnforcement, which would then require this
+// operator to hold delete on bgpcloudconfigurations/finalizers.
+func configOwnerReference(config *networkingapi.BGPCloudConfiguration) metav1.OwnerReference {
+	controller := true
+	return metav1.OwnerReference{
+		APIVersion: networkingapi.GroupVersion.String(),
+		Kind:       "BGPCloudConfiguration",
+		Name:       config.Name,
+		UID:        config.UID,
+		Controller: &controller,
+	}
+}
+
 // OperatorNamespace is where the operator is running, which is where the
 // cloud credential operator will put the secret it writes. OLM can
 // install into a namespace of the administrator's choosing, so the

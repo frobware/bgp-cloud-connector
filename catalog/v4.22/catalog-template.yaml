@@ -4,17 +4,26 @@ entries:
   name: bgp-cloud-connector
   schema: olm.package
 - entries:
+  - name: bgp-cloud-connector.v0.1.0
+    replaces: bgp-cloud-connector.v0.0.1
+    skipRange: <0.1.0
   - name: bgp-cloud-connector.v0.0.1
     skipRange: <0.0.1
   name: alpha
   package: bgp-cloud-connector
   schema: olm.channel
 - entries:
+  - name: bgp-cloud-connector.v0.1.0
+    replaces: bgp-cloud-connector.v0.0.1
+    skipRange: <0.1.0
   - name: bgp-cloud-connector.v0.0.1
     skipRange: <0.0.1
   name: stable
   package: bgp-cloud-connector
   schema: olm.channel
+- image: registry.redhat.io/bgpcc/bgp-cloud-connector-operator-bundle@sha256:bde280835a23c471b750c43669153ea331d32c568065b22bd170f51678545773
+  name: bgp-cloud-connector.v0.1.0
+  schema: olm.bundle
 - image: registry.redhat.io/bgpcc/bgp-cloud-connector-operator-bundle@sha256:b2a438ed7fa6ac086d5640bbd8c78e2aaaa6e467db522294368bb05402d83794
   name: bgp-cloud-connector.v0.0.1
   schema: olm.bundle

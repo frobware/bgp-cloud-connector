@@ -29,7 +29,7 @@ Tests for the BGP cloud connector controllers and helpers. Unit tests are split 
 
 **Platform interface tests** use `spec.aws` set with a mocked `CloudPlatform` interface. The mock returns a `DiscoveryResult` with 1 Route Server, 1 endpoint (`rse-001` in `us-east-1a`, address `10.0.1.47`, remote ASN `64512`). No real AWS credentials required.
 
-**E2E tests** read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). Each profile contains a `cudnbgpconfig.yaml` and `cudnbgprouting.yaml` matching the target cluster. Shared E2E tests require explicit `spec.bgp.peerGroups` under `platform: Manual`. See the `ocp-or18` profile for an example.
+**E2E tests** read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). Each profile contains a `bgpcloudconfiguration.yaml` and `bgprouting.yaml` matching the target cluster. Shared E2E tests require explicit `spec.bgp.peerGroups` under `platform: Manual`. See the `ocp-or18` profile for an example.
 
 ---
 
@@ -48,17 +48,17 @@ Tests the controller reconciliation logic without any cloud provider configured.
 | ID | Test Case | Setup | Expected Result |
 |:---|:---|:---|:---|
 | UT-01 | Full reconcile (Phases 1-2, 4) | Network CR exists, FRR namespace + pod running, explicit `bgp.peerGroups` | Network patched, FRRConfigurations created from explicit neighbors, phase=Ready with 3 conditions |
-| UT-02 | Delete blocked by routing CRs | CUDNBgpRouting CR exists | Finalizer retained, requeues every 10s |
+| UT-02 | Delete blocked by routing CRs | BGPRouting CR exists | Finalizer retained, requeues every 10s |
 
 #### Routing Controller
 
 | ID | Test Case | Setup | Expected Result |
 |:---|:---|:---|:---|
-| UT-03 | Duplicate network name | Another CUDNBgpRouting claims same spec.network.name | phase=Degraded, reason=DuplicateNetwork |
+| UT-03 | Duplicate network name | Another BGPRouting claims same spec.network.name | phase=Degraded, reason=DuplicateNetwork |
 | UT-04 | Full reconcile | Config Ready, labeled namespace pre-created | CUDN + RouteAdvertisements created, phase=Ready with 2 conditions |
 | UT-04b | No labeled namespace | Config Ready, no namespace with required labels | phase=Degraded, reason=NamespaceNotReady |
-| UT-05 | Delete last removes RA | No other CUDNBgpRouting CRs | CUDN deleted, RouteAdvertisements deleted, finalizer removed |
-| UT-06 | Delete keeps RA when others exist | Another CUDNBgpRouting CR exists | CUDN deleted, RouteAdvertisements retained |
+| UT-05 | Delete last removes RA | No other BGPRouting CRs | CUDN deleted, RouteAdvertisements deleted, finalizer removed |
+| UT-06 | Delete keeps RA when others exist | Another BGPRouting CR exists | CUDN deleted, RouteAdvertisements retained |
 
 #### Watch Map Functions
 
@@ -110,11 +110,11 @@ Tests the config controller's interaction with the generic `CloudPlatform` inter
 
 Platform-independent end-to-end tests that validate behavior only a real cluster with a live BGP peer can exercise — BGP session establishment, route advertisement, drift recovery, and cleanup. Unit tests cover the reconciliation logic; E2E tests verify the downstream effect on actual BGP sessions.
 
-Tests read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). The `CUDNBgpConfig` CR must use explicit `spec.bgp.peerGroups` under `platform: Manual`.
+Tests read CR manifests from a profile directory (`test/e2e/manifests/<profile>/`). The `BGPCloudConfiguration` CR must use explicit `spec.bgp.peerGroups` under `platform: Manual`.
 
 | Component | How discovered |
 |:---|:---|
-| BGP neighbors, ASN, node selectors | From `CUDNBgpConfig` CR in the profile (`spec.bgp.peerGroups`) |
+| BGP neighbors, ASN, node selectors | From `BGPCloudConfiguration` CR in the profile (`spec.bgp.peerGroups`) |
 | Router nodes | Listed from cluster using CR's `routerNodeSelector` |
 | BGP session state | `BGPSessionState` CRD (`frrk8s.metallb.io/v1beta1`) |
 | FRR running config | `FRRNodeState` CRD (`frrk8s.metallb.io/v1beta1`) |
@@ -123,7 +123,7 @@ Tests read CR manifests from a profile directory (`test/e2e/manifests/<profile>/
 
 | ID | Test Case | Action | Verification |
 |:---|:---|:---|:---|
-| E2E-01 | Full stack reconcile with BGP session verification | Apply `CUDNBgpConfig` CR, create labeled namespace, apply `CUDNBgpRouting` CR | Config phase=`Ready`; FRRConfigurations created per AZ; routing phase=`Ready` with CUDN + RouteAdvertisements; `BGPSessionState` resources show `Established` for all router nodes; CUDN subnets appear in FRR advertised routes |
+| E2E-01 | Full stack reconcile with BGP session verification | Apply `BGPCloudConfiguration` CR, create labeled namespace, apply `BGPRouting` CR | Config phase=`Ready`; FRRConfigurations created per AZ; routing phase=`Ready` with CUDN + RouteAdvertisements; `BGPSessionState` resources show `Established` for all router nodes; CUDN subnets appear in FRR advertised routes |
 
 ### Drift Recovery
 
@@ -150,8 +150,8 @@ make test
 # Prerequisites:
 # - oc login to OCP 4.21+ cluster with an external BGP peer
 # - Operator deployed to the cluster
-# - A profile with CUDNBgpConfig using explicit peerGroups under platform: Manual
+# - A profile with BGPCloudConfiguration using explicit peerGroups under platform: Manual
 make test-e2e <profile>
 ```
 
-Profiles are directories under `test/e2e/manifests/` containing `cudnbgpconfig.yaml` and `cudnbgprouting.yaml`. To test your own cluster, create a profile directory with CRs pointing to your BGP peer and run `make test-e2e <profile-name>`.
+Profiles are directories under `test/e2e/manifests/` containing `bgpcloudconfiguration.yaml` and `bgprouting.yaml`. To test your own cluster, create a profile directory with CRs pointing to your BGP peer and run `make test-e2e <profile-name>`.

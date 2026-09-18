@@ -30,7 +30,7 @@ import (
 
 // CUDNValidationError is returned when the Kubernetes API server rejects a CUDN
 // object as structurally invalid (e.g. bad CIDR in spec.network.layer2.subnets).
-// This is a terminal condition — the user must correct spec.network in the CUDNBgpRouting.
+// This is a terminal condition — the user must correct spec.network in the BGPRouting.
 type CUDNValidationError struct {
 	Cause error
 }
@@ -96,7 +96,7 @@ func EnsureClusterUDN(ctx context.Context, c client.Client, routing *networkinga
 }
 
 func createOrUpdateCUDN(ctx context.Context, c client.Client, obj *unstructured.Unstructured) error {
-	err := createOrUpdate(ctx, c, obj)
+	err := createOrUpdate(ctx, c, obj, nil)
 	if err != nil && apierrors.IsInvalid(err) {
 		return &CUDNValidationError{Cause: err}
 	}

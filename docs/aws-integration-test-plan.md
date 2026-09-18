@@ -28,7 +28,7 @@ The default credential chain (IRSA) is bypassed in unit tests via mock injection
 
 | Component | How discovered |
 |:---|:---|
-| Region, Route Server IDs | From `CUDNBgpConfig` CR in the profile |
+| Region, Route Server IDs | From `BGPCloudConfiguration` CR in the profile |
 | Endpoints, neighbor IPs, remote ASN, AZs | Auto-discovered by the operator from Route Server IDs |
 | Router nodes + AZs | Listed from cluster using CR's routerNodeSelector + `topology.kubernetes.io/zone` |
 | AWS credentials | Via IRSA (operator's ServiceAccount assumes IAM role) |
@@ -93,7 +93,7 @@ Full end-to-end tests running the operator on a ROSA HCP cluster with VPC Route 
 
 | ID | Test Case | Action | Verification |
 |:---|:---|:---|:---|
-| E2E-AWS-01 | Full stack reconcile | Deploy operator, create labeled namespace, apply CUDNBgpConfig and CUDNBgpRouting CRs | Operator Running; config phase=Ready; `status.peerGroups` populated with the discovered plan, one group per AZ; FRRConfigurations created per discovered AZ with discovered neighbor addresses; Route Server peers exist per AZ; SourceDestCheck=false on router nodes; routing phase=Ready with CUDN + RouteAdvertisements; FRR pods show established BGP sessions |
+| E2E-AWS-01 | Full stack reconcile | Deploy operator, create labeled namespace, apply BGPCloudConfiguration and BGPRouting CRs | Operator Running; config phase=Ready; `status.peerGroups` populated with the discovered plan, one group per AZ; FRRConfigurations created per discovered AZ with discovered neighbor addresses; Route Server peers exist per AZ; SourceDestCheck=false on router nodes; routing phase=Ready with CUDN + RouteAdvertisements; FRR pods show established BGP sessions |
 
 ### Node Lifecycle
 
@@ -146,7 +146,7 @@ Full operator lifecycle on a ROSA HCP cluster with VPC Route Server infrastructu
 make test-e2e-aws rosa-bgp-poc 
 ```
 
-Profiles are directories under `test/e2e/manifests/` containing `cudnbgpconfig.yaml` and `cudnbgprouting.yaml`. To test your own ROSA cluster, create a profile directory with your CRs, configure IRSA for the operator's ServiceAccount, and run `make test-e2e-aws <profile-name>`.
+Profiles are directories under `test/e2e/manifests/` containing `bgpcloudconfiguration.yaml` and `bgprouting.yaml`. To test your own ROSA cluster, create a profile directory with your CRs, configure IRSA for the operator's ServiceAccount, and run `make test-e2e-aws <profile-name>`.
 
 #### AWS credentials for the test runner
 

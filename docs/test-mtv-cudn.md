@@ -8,7 +8,7 @@ Testing VM migration from OpenStack to OCP using MTV (Forklift) into a namespace
 
 - Namespace `app1` with labels `cluster-udn=prod`, `k8s.ovn.org/primary-user-defined-network=""`
 - `ClusterUserDefinedNetwork` `cluster-udn-prod`: Layer2, `10.100.0.0/16`, persistent IPAM
-- `CUDNBgpRouting` advertising `10.100.0.0/16` via BGP
+- `BGPRouting` advertising `10.100.0.0/16` via BGP
 
 ## Prerequisites
 

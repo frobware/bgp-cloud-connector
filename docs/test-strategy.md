@@ -49,12 +49,13 @@ Ordered by infrastructure cost:
 ```
 internal/
   controller/
-    cudnbgpconfig_controller_test.go   ← config controller (Phases 1-5, mocked CloudPlatform)
-    cudnbgprouting_controller_test.go  ← routing controller
-    helpers_test.go                    ← helpers (NS, CUDN, FRR, RouteAdvertisements)
-  platform/                            ← mocked at cloud SDK client level
-    aws/
-      aws_test.go                      ← AWS platform (mocked EC2/STS clients)
+    bgpcloudconfiguration_controller_test.go  ← config controller (Phases 1-5, mocked CloudPlatform)
+    bgprouting_controller_test.go             ← routing controller
+    helpers_test.go, frr_test.go, status_test.go  ← helpers (NS, CUDN, FRR, RouteAdvertisements, status)
+  platform/                                   ← mocked at cloud SDK client level
+    aws/   aws_test.go, credentials_test.go            ← AWS platform (mocked EC2/STS clients)
+    azure/ azure_test.go, client_test.go, routeserver_test.go  ← Azure platform (mocked ARM clients)
+    gcp/   gcp_test.go, compute_test.go, ncc_test.go, spokes_test.go  ← GCP platform (mocked GCP clients)
 ```
 
 ### E2E test structure
@@ -67,9 +68,9 @@ test/e2e/
     aws_e2e_suite_test.go              ← AWS suite setup (k8s client + EC2 client + discovery)
     aws_e2e_test.go                    ← AWS E2E (requires AWS credential configured)
   manifests/
-    <profile>/                         ← per-cluster profile (CUDNBgpConfig + CUDNBgpRouting)
-      cudnbgpconfig.yaml
-      cudnbgprouting.yaml
+    <profile>/                         ← per-cluster profile (BGPCloudConfiguration + BGPRouting)
+      bgpcloudconfiguration.yaml
+      bgprouting.yaml
 ```
 
 E2E tests read CR manifests from a profile directory under `test/e2e/manifests/<profile>/`. Shared E2E tests use CRs under `platform: Manual` (explicit `peerGroups`); provider-specific tests require `spec.aws` (or equivalent).
@@ -101,7 +102,7 @@ type CloudPlatform interface {
 
 `DiscoverEndpoints` returns the discovered Route Server endpoints, their BGP neighbor addresses, AZs, and remote ASN. This data drives FRR configuration generation (Phase 4) and is written to CR status. Every cloud provider implements this interface. Each provider's test plan maps to the same set of concerns:
 
-| Test category | Interface concept | AWS | GCP (future) | Azure (future) |
+| Test category | Interface concept | AWS | GCP | Azure |
 |:---|:---|:---|:---|:---|
 | Platform initialization | `New()` constructor | IRSA (default credential chain) + `sts:GetCallerIdentity` validation | Workload Identity | Workload Identity |
 | Provider ID → instance ID + AZ | `RouterNode.ProviderID` | `aws:///zone/instance` | `gce:///project/zone/instance` | `azure:///...` |
@@ -115,8 +116,8 @@ type CloudPlatform interface {
 |:---|:---|:---|
 | Platform-independent (controllers + helpers + E2E) | [docs/controller-test-plan.md](controller-test-plan.md) | Active |
 | AWS | [docs/aws-integration-test-plan.md](aws-integration-test-plan.md) | Active |
-| GCP | `docs/gcp-integration-test-plan.md` | Future |
-| Azure | `docs/azure-integration-test-plan.md` | Future |
+| GCP | `docs/gcp-integration-test-plan.md` | Implemented + unit tests (`internal/platform/gcp/`); plan doc + E2E TODO |
+| Azure | `docs/azure-integration-test-plan.md` | Implemented + unit tests (`internal/platform/azure/`); plan doc + E2E TODO |
 
 When adding a new provider, clone the AWS test plan and replace:
 

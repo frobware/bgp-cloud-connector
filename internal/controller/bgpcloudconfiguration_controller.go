@@ -459,7 +459,7 @@ func buildAWSPlatform(ctx context.Context, c client.Client, config *networkingap
 
 	// May report platform.ErrCredentialsPending, which Reconcile waits
 	// out rather than treating as a fault.
-	creds, err := awsplatform.ResolveCredentials(ctx, c, OperatorNamespace(), awsSpec.Region)
+	creds, err := awsplatform.ResolveCredentials(ctx, c, OperatorNamespace(), awsSpec.Region, configOwnerReference(config))
 	if err != nil {
 		return nil, err
 	}
@@ -494,7 +494,7 @@ func buildAzurePlatform(ctx context.Context, c client.Client, config *networking
 	// nothing in its chain can produce a token, so without this the
 	// failure arrives from DiscoverEndpoints and reads as a discovery
 	// problem rather than a credentials one.
-	cred, err := azureplatform.ResolveCredentials(ctx, c, OperatorNamespace())
+	cred, err := azureplatform.ResolveCredentials(ctx, c, OperatorNamespace(), configOwnerReference(config))
 	if err != nil {
 		return nil, err
 	}

@@ -30,6 +30,8 @@ set -o pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=hack/aws/ci.sh
 source "${here}/aws/ci.sh"
+# shellcheck source=hack/lib/spyglass-report.sh
+source "${here}/lib/spyglass-report.sh"
 
 teardown_done=false
 
@@ -115,6 +117,11 @@ if (( test_rc == 0 )); then
 else
     warn "test FAILED, exit ${test_rc}"
 fi
+
+# Best-effort: a reviewer opening the job lands on the verdict and the
+# failures rather than the tail of the build log. Never allowed to change
+# the outcome -- the test's exit status is what the job reports on.
+write_spyglass_report aws "${test_rc}" || warn "could not write the spyglass report"
 
 teardown_rc=0
 run_teardown || teardown_rc=$?

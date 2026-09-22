@@ -1,0 +1,56 @@
+# Deliberate fault injection for PR #139, finding 2. Kept apart from
+# PR-139-REPRO.yaml so that applying the setup cannot break the CR by accident.
+#
+# APPLYING THIS BREAKS THE BGPRouting ON PURPOSE, and it stays broken until
+# you delete the VM again.
+#
+# This VM can never be scheduled, so its VMI sits in Scheduling indefinitely.
+# discoverVMHostRoutes treats any non-terminal phase as pending, which returns
+# RequeueAfter 5s and skips PhaseReady, so the BGPRouting leaves Ready for
+# Configuring and stays there while every route it can configure is already
+# correct.
+#
+#   oc apply -f PR-139-FINDING2.yaml
+#   oc get bgprouting cudn1 -w
+#
+# Observed on aws-2609220800-42213, 2026-09-22: Configuring six seconds after
+# applying, 11 reconciles in the following 60 seconds, no recovery.
+#
+# To undo, which returns the CR to Ready within a second or two:
+#
+#   oc -n prod-test delete vm stuck-vm
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: stuck-vm
+  namespace: prod-test
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/domain: stuck-vm
+    spec:
+      nodeSelector:
+        no-such-label: "never-matches"
+      terminationGracePeriodSeconds: 0
+      domain:
+        devices:
+          interfaces:
+            - name: default
+              bridge: {}
+          disks:
+            - name: rootdisk
+              disk:
+                bus: virtio
+        resources:
+          requests:
+            memory: 256Mi
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          containerDisk:
+            image: quay.io/kubevirt/cirros-container-disk-demo

@@ -1,0 +1,168 @@
+# Reproduction material for PR #139: a KubeVirt VM on a Layer2 CUDN, and
+# something for it to talk to. Applying this should leave the BGPRouting in
+# Ready with one VM host route.
+#
+# The deliberate fault injection lives in PR-139-FINDING2.yaml, not here.
+#
+# BEFORE APPLYING, edit one value: SRV in the cloud-init at the bottom. It is
+# the web pod's CUDN address, which is allocated when the pod starts, so it
+# differs per cluster and per rebuild. Apply this file, then:
+#
+#   oc -n prod-test get pod web -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' \
+#     | python3 -c "import json,sys; d=json.load(sys.stdin); print([v['ip_addresses'] for k,v in d.items() if 'cluster-udn' in k][0][0])"
+#
+# and re-apply with SRV set, then restart the VM. `oc get pod -o wide` reports
+# the default network address, not this one, and using it fails silently.
+#
+# PREREQUISITES, in order:
+#   ../devenv/enable-frr                       FRR + routeAdvertisements on Network/cluster
+#   direnv exec . make install                 the operator CRDs
+#   oc label node <worker> bgp_router=true     every node in the router pool
+#   OpenShift Virtualization, and a HyperConverged CR.
+#     On AWS no non-metal instance type has /dev/kvm, so it needs software
+#     emulation:
+#       annotations:
+#         kubevirt.kubevirt.io/jsonpatch: |-
+#           [{"op": "add", "path": "/spec/configuration/developerConfiguration/useEmulation", "value": true}]
+#     Emulation is enough for all of this. phase and
+#     status.interfaces[].ipAddresses are filled by virt-handler before the
+#     guest boots, and cirros still boots and curls, just slowly.
+#   The operator running against the cluster. `make run` shells out to
+#   `go vet ./...` first, so an unrelated broken package stops it; use
+#   `direnv exec . go run ./cmd/main.go --zap-devel` instead.
+#   A BGPCloudConfiguration and a BGPRouting for network "prod".
+#
+# WHAT TO LOOK AT AFTERWARDS:
+#   oc get bgprouting cudn1                    expect Ready
+#   oc -n openshift-frr-k8s get frrconfiguration -l \
+#     app.kubernetes.io/managed-by=bgp-cloud-connector-vm-host-routes
+#                                              expect one, naming the VM's node
+#   oc -n prod-test logs web                   expect a GET from the VM's own
+#                                              CUDN address, proving no SNAT
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod-test
+  labels:
+    k8s.ovn.org/primary-user-defined-network: ""
+    cluster-udn: prod
+---
+# Something for the VM to talk to, on the CUDN. Content comes from a
+# ConfigMap so a rerun is identical and httpd serves 200 rather than 403 for
+# an empty document root.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-content
+  namespace: prod-test
+data:
+  index.html: "<h1>reached the pod over BGP</h1>"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web
+  namespace: prod-test
+  labels:
+    app: web
+spec:
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: web
+      image: registry.access.redhat.com/ubi9/httpd-24:latest
+      ports:
+        - containerPort: 8080
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: content
+          mountPath: /var/www/html
+  volumes:
+    - name: content
+      configMap:
+        name: web-content
+---
+# The VM under test.
+#
+# bridge binding, not masquerade: docs/kubevirt-testing.md records that
+# masquerade installs nftables rules in virt-launcher which drop inbound
+# traffic on the UDN interface.
+#
+# The nodeSelector is the router pool label, not a specific hostname, so this
+# is portable between clusters. It also matches what the feature requires: a
+# VM on a node outside the pool cannot have a host route at all, and as the
+# code stands that puts the whole BGPRouting into Degraded.
+#
+# logSerialConsole plus the cloud-init probe means the result does not depend
+# on getting an interactive console, which needs virtctl.
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: bgp-vm
+  namespace: prod-test
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/domain: bgp-vm
+    spec:
+      nodeSelector:
+        bgp_router: "true"
+      terminationGracePeriodSeconds: 0
+      domain:
+        devices:
+          logSerialConsole: true
+          interfaces:
+            - name: default
+              bridge: {}
+          disks:
+            - name: rootdisk
+              disk:
+                bus: virtio
+            - name: cloudinit
+              disk:
+                bus: virtio
+        resources:
+          requests:
+            memory: 512Mi
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          containerDisk:
+            image: quay.io/kubevirt/cirros-container-disk-demo
+        - name: cloudinit
+          cloudInitNoCloud:
+            userData: |
+              #!/bin/sh
+              # EDIT THIS: the web pod's CUDN address. See the header.
+              SRV=10.100.0.5
+              for i in $(seq 1 90); do
+                ip -4 addr show eth0 2>/dev/null | grep -q "inet " && break
+                sleep 1
+              done
+              echo "BGPTEST guest-addr=$(ip -4 -o addr show eth0 | awk '{print $4}')"
+              echo "BGPTEST default-route=$(ip route show default)"
+              i=0
+              while [ $i -lt 30 ]; do
+                i=$((i+1))
+                if out=$(curl -s -m 5 "http://$SRV:8080/" 2>/dev/null); then
+                  echo "BGPTEST curl-ok body=$out"
+                  break
+                fi
+                if out=$(wget -q -T 5 -O - "http://$SRV:8080/" 2>/dev/null); then
+                  echo "BGPTEST wget-ok body=$out"
+                  break
+                fi
+                echo "BGPTEST retry $i"
+                sleep 2
+              done
+              echo "BGPTEST done"

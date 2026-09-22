@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	networkingapi "github.com/openshift/bgp-cloud-connector/api/v1beta1"
@@ -721,4 +722,71 @@ func TestRoutingReconcile_CUDNSpecInvalid_NoRequeue(t *testing.T) {
 		}
 	}
 	t.Error("NetworkCreated condition with CUDNSpecInvalid reason not found")
+}
+
+func nodeWithLabels(labels map[string]string) *corev1.Node {
+	return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-a", Labels: labels}}
+}
+
+// Node labels decide whether a node is in the router pool and which peer group
+// it belongs to, so a label change alters what EnsureVMHostRoutes writes.
+// Nothing else about a node does, and node status churns constantly.
+func TestNodeLabelChangePredicate(t *testing.T) {
+	p := nodeLabelChangePredicate()
+
+	same := nodeWithLabels(map[string]string{"bgp_router": "true"})
+	churned := same.DeepCopy()
+	churned.Status.Addresses = []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "10.0.0.1"}}
+	churned.ResourceVersion = "2"
+	if p.Update(event.UpdateEvent{ObjectOld: same, ObjectNew: churned}) {
+		t.Error("a node status change with unchanged labels triggered a reconcile")
+	}
+
+	relabelled := same.DeepCopy()
+	delete(relabelled.Labels, "bgp_router")
+	if !p.Update(event.UpdateEvent{ObjectOld: same, ObjectNew: relabelled}) {
+		t.Error("a node leaving the router pool did not trigger a reconcile")
+	}
+
+	if !p.Delete(event.DeleteEvent{Object: same}) {
+		t.Error("a node being deleted did not trigger a reconcile")
+	}
+}
+
+// EnsureVMHostRoutes reads spec.routerNodeSelector, the BGP settings and, on a
+// cloud, status.peerGroups. None of those reaching this controller means the VM
+// host routes keep the old neighbour set until the next resync, while bgp-cc-N
+// is rewritten at once by the controller that does watch them.
+func TestConfigRelevantToRoutingPredicate(t *testing.T) {
+	p := configRelevantToRoutingPredicate()
+
+	base := newReadyBGPCloudConfiguration()
+	base.Generation = 1
+
+	conditionsOnly := base.DeepCopy()
+	conditionsOnly.Status.Conditions = []metav1.Condition{{
+		Type: ConditionDeletionBlocked, Status: metav1.ConditionFalse, Reason: ReasonReconciled,
+		LastTransitionTime: metav1.Now(),
+	}}
+	if p.Update(event.UpdateEvent{ObjectOld: base, ObjectNew: conditionsOnly}) {
+		t.Error("a condition-only status change triggered a reconcile of every BGPRouting")
+	}
+
+	specChanged := base.DeepCopy()
+	specChanged.Generation = 2
+	if !p.Update(event.UpdateEvent{ObjectOld: base, ObjectNew: specChanged}) {
+		t.Error("a spec change did not trigger a reconcile")
+	}
+
+	phaseChanged := base.DeepCopy()
+	phaseChanged.Status.Phase = networkingapi.PhaseDegraded
+	if !p.Update(event.UpdateEvent{ObjectOld: base, ObjectNew: phaseChanged}) {
+		t.Error("a phase change did not trigger a reconcile")
+	}
+
+	peersChanged := base.DeepCopy()
+	peersChanged.Status.PeerGroups = []networkingapi.PeerGroupStatus{{Key: "a"}}
+	if !p.Update(event.UpdateEvent{ObjectOld: base, ObjectNew: peersChanged}) {
+		t.Error("a discovered peer group change did not trigger a reconcile")
+	}
 }

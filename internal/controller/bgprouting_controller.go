@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -310,6 +311,12 @@ func (r *BGPRoutingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(cudn, handler.EnqueueRequestsFromMapFunc(
 			r.mapClusterUDNToRouting,
 		)).
+		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(
+			r.enqueueAllRoutings,
+		), builder.WithPredicates(nodeLabelChangePredicate())).
+		Watches(&networkingapi.BGPCloudConfiguration{}, handler.EnqueueRequestsFromMapFunc(
+			r.enqueueAllRoutings,
+		), builder.WithPredicates(configRelevantToRoutingPredicate())).
 		Watches(&networkingapi.BGPRouting{}, handler.EnqueueRequestsFromMapFunc(
 			r.enqueueAllRoutings,
 		), builder.WithPredicates(predicate.Funcs{
@@ -396,4 +403,43 @@ func (r *BGPRoutingReconciler) mapClusterUDNToRouting(ctx context.Context, obj c
 		}
 	}
 	return nil
+}
+
+// nodeLabelChangePredicate passes only the node changes that alter what this
+// controller writes. Labels decide whether a node is in the router pool and
+// which peer group it belongs to; nothing else about a node is read, and node
+// status churns on every kubelet heartbeat.
+func nodeLabelChangePredicate() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldNode, ok1 := e.ObjectOld.(*corev1.Node)
+			newNode, ok2 := e.ObjectNew.(*corev1.Node)
+			if !ok1 || !ok2 {
+				return true
+			}
+			return !reflect.DeepEqual(oldNode.Labels, newNode.Labels)
+		},
+		GenericFunc: func(event.GenericEvent) bool { return false },
+	}
+}
+
+// configRelevantToRoutingPredicate passes the BGPCloudConfiguration changes
+// that alter the VM host routes: the spec, which carries routerNodeSelector and
+// the BGP settings, the phase, which gates reconciling at all, and the peer
+// groups a cloud discovers, which supply the neighbour list. Its conditions
+// churn without changing any of that.
+func configRelevantToRoutingPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldConfig, ok1 := e.ObjectOld.(*networkingapi.BGPCloudConfiguration)
+			newConfig, ok2 := e.ObjectNew.(*networkingapi.BGPCloudConfiguration)
+			if !ok1 || !ok2 {
+				return true
+			}
+			return oldConfig.Generation != newConfig.Generation ||
+				oldConfig.Status.Phase != newConfig.Status.Phase ||
+				!reflect.DeepEqual(oldConfig.Status.PeerGroups, newConfig.Status.PeerGroups)
+		},
+		GenericFunc: func(event.GenericEvent) bool { return false },
+	}
 }

@@ -94,14 +94,14 @@ func TestEnsureVMHostRoutesAggregatesDualStackRoutesPerNode(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(vmHostRouteTestScheme()).WithObjects(objects...).Build()
 
-	count, pending, err := EnsureVMHostRoutes(ctx, c, routing, config)
+	status, err := EnsureVMHostRoutes(ctx, c, routing, config)
 	if err != nil {
 		t.Fatalf("EnsureVMHostRoutes: %v", err)
 	}
-	if count != 4 {
-		t.Fatalf("route count = %d, want 4", count)
+	if status.Configured != 4 {
+		t.Fatalf("Configured = %d, want 4", status.Configured)
 	}
-	if pending {
+	if status.Pending {
 		t.Fatal("routes unexpectedly pending")
 	}
 
@@ -135,7 +135,7 @@ func TestEnsureVMHostRoutesAggregatesDualStackRoutesPerNode(t *testing.T) {
 	}
 }
 
-func TestEnsureVMHostRoutesRejectsPrefixWithoutSameFamilyNeighbor(t *testing.T) {
+func TestEnsureVMHostRoutesReportsPrefixWithoutSameFamilyNeighbour(t *testing.T) {
 	ctx := context.Background()
 	routing := newTestBGPRouting()
 	routing.Spec.Network.Subnets = []string{"fd00:100::/64"}
@@ -146,9 +146,12 @@ func TestEnsureVMHostRoutesRejectsPrefixWithoutSameFamilyNeighbor(t *testing.T) 
 		testVMNamespace(), node, testVMI("vms", "vm", node.Name, "fd00:100::4"),
 	).Build()
 
-	_, _, err := EnsureVMHostRoutes(ctx, c, routing, config)
-	if err == nil || !strings.Contains(err.Error(), "no BGP neighbor of the same address family") {
-		t.Fatalf("expected address-family error, got %v", err)
+	status, err := EnsureVMHostRoutes(ctx, c, routing, config)
+	if err != nil {
+		t.Fatalf("EnsureVMHostRoutes: %v", err)
+	}
+	if len(status.Unserved) != 1 || !strings.Contains(status.Unserved[0], "no BGP neighbour of the same address family") {
+		t.Fatalf("Unserved = %v, want one entry naming the address family", status.Unserved)
 	}
 }
 
@@ -162,12 +165,12 @@ func TestEnsureVMHostRoutesRetriesWhileVMIAddressIsPending(t *testing.T) {
 		testVMNamespace(), node, testVMI("vms", "vm", node.Name),
 	).Build()
 
-	count, pending, err := EnsureVMHostRoutes(ctx, c, routing, config)
+	status, err := EnsureVMHostRoutes(ctx, c, routing, config)
 	if err != nil {
 		t.Fatalf("EnsureVMHostRoutes: %v", err)
 	}
-	if count != 0 || !pending {
-		t.Fatalf("count = %d, pending = %t; want 0, true", count, pending)
+	if status.Configured != 0 || !status.Pending {
+		t.Fatalf("Configured = %d, Pending = %t; want 0, true", status.Configured, status.Pending)
 	}
 }
 
@@ -180,12 +183,12 @@ func TestEnsureVMHostRoutesDoesNotRetryTerminalVMI(t *testing.T) {
 		testVMNamespace(), vmi,
 	).Build()
 
-	count, pending, err := EnsureVMHostRoutes(ctx, c, routing, newReadyBGPCloudConfiguration())
+	status, err := EnsureVMHostRoutes(ctx, c, routing, newReadyBGPCloudConfiguration())
 	if err != nil {
 		t.Fatalf("EnsureVMHostRoutes: %v", err)
 	}
-	if count != 0 || pending {
-		t.Fatalf("count = %d, pending = %t; want 0, false", count, pending)
+	if status.Configured != 0 || status.Pending {
+		t.Fatalf("Configured = %d, Pending = %t; want 0, false", status.Configured, status.Pending)
 	}
 }
 
@@ -199,7 +202,7 @@ func TestEnsureVMHostRoutesMovesRouteWithVMI(t *testing.T) {
 	vmi := testVMI("vms", "vm", nodeA.Name, "10.100.0.4")
 	c := fake.NewClientBuilder().WithScheme(vmHostRouteTestScheme()).WithObjects(testVMNamespace(), nodeA, nodeB, vmi).Build()
 
-	if _, _, err := EnsureVMHostRoutes(ctx, c, routing, config); err != nil {
+	if _, err := EnsureVMHostRoutes(ctx, c, routing, config); err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
 	oldKey := types.NamespacedName{Name: vmHostRouteConfigurationName(routing.Name, nodeA.Name), Namespace: FRRNamespace}
@@ -208,7 +211,7 @@ func TestEnsureVMHostRoutesMovesRouteWithVMI(t *testing.T) {
 	if err := c.Update(ctx, vmi); err != nil {
 		t.Fatalf("move VMI: %v", err)
 	}
-	if _, _, err := EnsureVMHostRoutes(ctx, c, routing, config); err != nil {
+	if _, err := EnsureVMHostRoutes(ctx, c, routing, config); err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
 	old := &unstructured.Unstructured{}
@@ -236,7 +239,7 @@ func TestEnsureVMHostRoutesDoesNotPruneAnotherRouting(t *testing.T) {
 		},
 	}}
 	c := fake.NewClientBuilder().WithScheme(vmHostRouteTestScheme()).WithObjects(other).Build()
-	if _, _, err := EnsureVMHostRoutes(ctx, c, routing, newReadyBGPCloudConfiguration()); err != nil {
+	if _, err := EnsureVMHostRoutes(ctx, c, routing, newReadyBGPCloudConfiguration()); err != nil {
 		t.Fatalf("EnsureVMHostRoutes: %v", err)
 	}
 	got := &unstructured.Unstructured{}
@@ -262,9 +265,12 @@ func TestEnsureVMHostRoutesWithdrawsRouteFromNonRouterNode(t *testing.T) {
 		testVMNamespace(), node, testVMI("vms", "vm", node.Name, "10.100.0.4"), stale,
 	).Build()
 
-	_, _, err := EnsureVMHostRoutes(ctx, c, routing, newReadyBGPCloudConfiguration())
-	if err == nil || !strings.Contains(err.Error(), node.Name) {
-		t.Fatalf("expected non-router node error, got %v", err)
+	status, err := EnsureVMHostRoutes(ctx, c, routing, newReadyBGPCloudConfiguration())
+	if err != nil {
+		t.Fatalf("EnsureVMHostRoutes: %v", err)
+	}
+	if len(status.Unserved) != 1 || !strings.Contains(status.Unserved[0], node.Name) {
+		t.Fatalf("Unserved = %v, want one entry naming %s", status.Unserved, node.Name)
 	}
 	got := &unstructured.Unstructured{}
 	got.SetGroupVersionKind(FRRConfigurationGVK)
@@ -311,14 +317,14 @@ func TestEnsureVMHostRoutesSkipsVMIWhoseNodeIsGone(t *testing.T) {
 		stale,
 	).Build()
 
-	count, pending, err := EnsureVMHostRoutes(ctx, c, routing, config)
+	status, err := EnsureVMHostRoutes(ctx, c, routing, config)
 	if err != nil {
 		t.Fatalf("EnsureVMHostRoutes: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("count = %d, want 1", count)
+	if status.Configured != 1 {
+		t.Fatalf("Configured = %d, want 1", status.Configured)
 	}
-	if !pending {
+	if !status.Pending {
 		t.Fatal("expected the VMI on the missing node to leave routes pending")
 	}
 

@@ -38,10 +38,25 @@ import (
 
 type vmHostRoutesByNode map[string][]string
 
-func EnsureVMHostRoutes(ctx context.Context, c client.Client, routing *networkingapi.BGPRouting, config *networkingapi.BGPCloudConfiguration) (int, bool, error) {
+// VMHostRouteStatus is what one pass of EnsureVMHostRoutes achieved. Pending
+// and Unserved are independent: routes can be written for some VMs while
+// others wait for an address and others cannot be given a route at all.
+type VMHostRouteStatus struct {
+	// Configured counts the prefixes written across every node.
+	Configured int
+	// Pending is set when a VMI has no usable address yet, or names a node
+	// that no longer exists. Both clear without anyone intervening.
+	Pending bool
+	// Unserved describes VMs that cannot be given a host route as the cluster
+	// stands, one entry per reason. Clearing these needs a change to the
+	// cluster, so they are reported rather than retried.
+	Unserved []string
+}
+
+func EnsureVMHostRoutes(ctx context.Context, c client.Client, routing *networkingapi.BGPRouting, config *networkingapi.BGPCloudConfiguration) (VMHostRouteStatus, error) {
 	routes, nodes, pending, err := discoverVMHostRoutes(ctx, c, routing)
 	if err != nil {
-		return 0, false, err
+		return VMHostRouteStatus{}, err
 	}
 
 	groups := effectivePeerGroups(config)
@@ -68,23 +83,27 @@ func EnsureVMHostRoutes(ctx context.Context, c client.Client, routing *networkin
 		name := vmHostRouteConfigurationName(routing.Name, nodeName)
 		expected[name] = struct{}{}
 		if err := ensureVMHostRouteConfiguration(ctx, c, routing, config, node, neighbors, supportedPrefixes, name); err != nil {
-			return 0, false, err
+			return VMHostRouteStatus{}, err
 		}
 		total += len(supportedPrefixes)
 	}
 
 	if err := pruneVMHostRouteConfigurations(ctx, c, routing.Name, expected); err != nil {
-		return 0, false, err
+		return VMHostRouteStatus{}, err
 	}
+
+	status := VMHostRouteStatus{Configured: total, Pending: pending}
 	if len(skipped) > 0 {
 		sort.Strings(skipped)
-		return total, false, fmt.Errorf("VMs are running on nodes without matching BGP peers: %s", strings.Join(skipped, ", "))
+		status.Unserved = append(status.Unserved,
+			fmt.Sprintf("VMs are running on nodes without matching BGP peers: %s", strings.Join(skipped, ", ")))
 	}
 	if len(unsupported) > 0 {
 		sort.Strings(unsupported)
-		return total, false, fmt.Errorf("VM host routes have no BGP neighbor of the same address family: %s", strings.Join(unsupported, "; "))
+		status.Unserved = append(status.Unserved,
+			fmt.Sprintf("VM host routes have no BGP neighbour of the same address family: %s", strings.Join(unsupported, "; ")))
 	}
-	return total, pending, nil
+	return status, nil
 }
 
 func discoverVMHostRoutes(ctx context.Context, c client.Client, routing *networkingapi.BGPRouting) (vmHostRoutesByNode, map[string]corev1.Node, bool, error) {

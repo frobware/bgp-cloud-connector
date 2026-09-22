@@ -156,30 +156,40 @@ func (r *BGPRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Phase 3: advertise host routes from each VM's hosting worker.
 	log.Info("Phase 3: ensuring VM host routes")
-	hostRouteCount, hostRoutesPending, err := EnsureVMHostRoutes(ctx, r.Client, routing, bgpConfig)
+	hostRoutes, err := EnsureVMHostRoutes(ctx, r.Client, routing, bgpConfig)
 	if err != nil {
 		return r.setDegraded(ctx, routing, *baselineStatus, networkingapi.ConditionVMHostRoutesConfigured,
 			ReasonVMHostRoutesFailed, fmt.Sprintf("failed to ensure VM host routes: %v", err))
 	}
-	// Phase tracks the network. A VM whose address has not appeared yet is
-	// reported on the condition and requeued for, but it does not make the
-	// ClusterUDN and the RouteAdvertisements any less configured, and a VM
-	// that never schedules would otherwise hold the CR short of Ready for as
-	// long as it exists.
-	if hostRoutesPending {
+	// Phase tracks the network. Neither a VM waiting for an address nor one
+	// that cannot be given a host route at all makes the ClusterUDN and the
+	// RouteAdvertisements less configured, and either would otherwise hold the
+	// CR short of Ready for as long as that VM exists. The condition carries
+	// which of the two it is.
+	switch {
+	case len(hostRoutes.Unserved) > 0:
+		meta.SetStatusCondition(&routing.Status.Conditions, metav1.Condition{
+			Type:   networkingapi.ConditionVMHostRoutesConfigured,
+			Status: metav1.ConditionFalse,
+			Reason: ReasonVMHostRoutesIncomplete,
+			Message: truncateConditionMessage(fmt.Sprintf("Configured %d VM host routes; %s",
+				hostRoutes.Configured, strings.Join(hostRoutes.Unserved, "; "))),
+			ObservedGeneration: routing.Generation,
+		})
+	case hostRoutes.Pending:
 		meta.SetStatusCondition(&routing.Status.Conditions, metav1.Condition{
 			Type:               networkingapi.ConditionVMHostRoutesConfigured,
 			Status:             metav1.ConditionUnknown,
 			Reason:             ReasonWaitingForVMIPs,
-			Message:            fmt.Sprintf("Configured %d VM host routes; waiting for VM addresses", hostRouteCount),
+			Message:            fmt.Sprintf("Configured %d VM host routes; waiting for VM addresses", hostRoutes.Configured),
 			ObservedGeneration: routing.Generation,
 		})
-	} else {
+	default:
 		meta.SetStatusCondition(&routing.Status.Conditions, metav1.Condition{
 			Type:               networkingapi.ConditionVMHostRoutesConfigured,
 			Status:             metav1.ConditionTrue,
 			Reason:             ReasonReconciled,
-			Message:            fmt.Sprintf("Configured %d VM host routes", hostRouteCount),
+			Message:            fmt.Sprintf("Configured %d VM host routes", hostRoutes.Configured),
 			ObservedGeneration: routing.Generation,
 		})
 	}
@@ -191,7 +201,7 @@ func (r *BGPRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	log.Info("reconciliation complete", "phase", routing.Status.Phase)
-	if hostRoutesPending {
+	if hostRoutes.Pending {
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil

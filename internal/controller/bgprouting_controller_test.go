@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -206,6 +207,53 @@ func TestRoutingReconcile_StaysReadyWhileVMIAddressIsPending(t *testing.T) {
 	condition := meta.FindStatusCondition(updated.Status.Conditions, networkingapi.ConditionVMHostRoutesConfigured)
 	if condition == nil || condition.Status != metav1.ConditionUnknown || condition.Reason != ReasonWaitingForVMIPs {
 		t.Fatalf("VM host-route condition = %#v, want Unknown/%s", condition, ReasonWaitingForVMIPs)
+	}
+}
+
+// A VM on a node outside the router pool cannot be given a host route, but the
+// ClusterUDN and the RouteAdvertisements are configured, so the network is
+// Ready and the condition carries the shortfall.
+func TestRoutingReconcile_StaysReadyWhenAVMCannotBeServed(t *testing.T) {
+	routing := newTestBGPRouting()
+	routing.Finalizers = []string{RoutingFinalizerName}
+	config := newReadyBGPCloudConfiguration()
+	config.Spec.BGP.PeerGroups[0].NodeSelector = nil
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:   "worker-plain",
+		Labels: map[string]string{corev1.LabelHostname: "worker-plain"},
+	}}
+	ns := testVMNamespace()
+	vmi := testVMI("vms", "vm", node.Name, "10.100.0.4")
+
+	s := routingTestScheme()
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(routing, config, node, ns, vmi).
+		WithStatusSubresource(routing, config).
+		Build()
+	r := &BGPRoutingReconciler{Client: c, Scheme: s}
+
+	if _, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: routing.Name}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	updated := &networkingapi.BGPRouting{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(routing), updated); err != nil {
+		t.Fatalf("get BGPRouting: %v", err)
+	}
+	if updated.Status.Phase != networkingapi.PhaseReady {
+		t.Fatalf("phase = %s, want Ready", updated.Status.Phase)
+	}
+	condition := meta.FindStatusCondition(updated.Status.Conditions, networkingapi.ConditionVMHostRoutesConfigured)
+	if condition == nil || condition.Status != metav1.ConditionFalse || condition.Reason != ReasonVMHostRoutesIncomplete {
+		t.Fatalf("VM host-route condition = %#v, want False/%s", condition, ReasonVMHostRoutesIncomplete)
+	}
+	if !strings.Contains(condition.Message, node.Name) {
+		t.Fatalf("condition message %q does not name %s", condition.Message, node.Name)
+	}
+	for _, other := range []string{networkingapi.ConditionNetworkCreated, networkingapi.ConditionRouteAdvertisementsCreated} {
+		if c := meta.FindStatusCondition(updated.Status.Conditions, other); c == nil || c.Status != metav1.ConditionTrue {
+			t.Fatalf("%s = %#v, want True", other, c)
+		}
 	}
 }
 

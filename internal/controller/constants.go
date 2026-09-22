@@ -74,6 +74,9 @@ const (
 	ReasonCUDNFailed           = "CUDNFailed"
 	ReasonRAFailed             = "RAFailed"
 	ReasonVMHostRoutesFailed   = "VMHostRoutesFailed"
+	// Reported when some VMs cannot be given a host route as the cluster
+	// stands. The network itself is configured, so this is not a failure.
+	ReasonVMHostRoutesIncomplete = "VMHostRoutesIncomplete"
 
 	// Success / informational reasons
 	ReasonPatched                 = "Patched"

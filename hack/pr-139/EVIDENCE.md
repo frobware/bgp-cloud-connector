@@ -130,9 +130,9 @@ state. Only the binary changes between the two observations.
 
 ---
 
-## `e1db12cb` Skip a VMI whose node has been deleted
+## [`e1db12cb`](https://github.com/frobware/bgp-cloud-connector/commit/e1db12cb474ce87bbaf8a0f3d1a2f7a22653e581) Skip a VMI whose node has been deleted
 
-**Starting condition.** Operator at `5e50fada`, the PR as written. VM running,
+**Starting condition.** Operator at [`5e50fada`](https://github.com/aswinsuryan/bgp-cloud-connector/commit/5e50fada836e903f0ae5e61863f7942ab579c15f), the PR as written. VM running,
 route pinned.
 
 ```
@@ -168,7 +168,7 @@ virt-launcher pod on that node still counts as alive, and a pod on a node with
 no kubelet keeps its container statuses until pod garbage collection removes it.
 The output above is that state.
 
-**Corrected.** Identical action, operator at `e1db12cb`, captured in the same
+**Corrected.** Identical action, operator at [`e1db12cb`](https://github.com/frobware/bgp-cloud-connector/commit/e1db12cb474ce87bbaf8a0f3d1a2f7a22653e581), captured in the same
 window with the VMI still naming the gone node:
 
 ```
@@ -181,13 +181,13 @@ node-not-found errors: 0
 ```
 
 The prune ran, so the stale `/32` is withdrawn rather than left advertising.
-`Configuring` here rather than `Ready` because this commit precedes `55b22c2f`.
+`Configuring` here rather than `Ready` because this commit precedes [`55b22c2f`](https://github.com/frobware/bgp-cloud-connector/commit/55b22c2f8446724d85140d93705d015ec99c5993).
 
 ---
 
-## `55b22c2f` Keep a BGPRouting Ready while VM addresses are pending
+## [`55b22c2f`](https://github.com/frobware/bgp-cloud-connector/commit/55b22c2f8446724d85140d93705d015ec99c5993) Keep a BGPRouting Ready while VM addresses are pending
 
-**Starting condition.** Operator at `e1db12cb` (parent). One healthy VM, route
+**Starting condition.** Operator at [`e1db12cb`](https://github.com/frobware/bgp-cloud-connector/commit/e1db12cb474ce87bbaf8a0f3d1a2f7a22653e581) (parent). One healthy VM, route
 written.
 
 ```
@@ -218,7 +218,7 @@ written and is correct. One unschedulable VM makes the whole network report
 not-ready for as long as it exists, and anything waiting on `Phase=Ready`
 waits forever.
 
-**Corrected.** Same cluster state, operator at `55b22c2f`:
+**Corrected.** Same cluster state, operator at [`55b22c2f`](https://github.com/frobware/bgp-cloud-connector/commit/55b22c2f8446724d85140d93705d015ec99c5993):
 
 ```
 phase=Ready
@@ -231,9 +231,9 @@ the VM.
 
 ---
 
-## `06025769` Report VMs that cannot be given a host route
+## [`06025769`](https://github.com/frobware/bgp-cloud-connector/commit/06025769e0b173d6cf9285cdbe925f2da5dc1275) Report VMs that cannot be given a host route
 
-**Starting condition.** Operator at `55b22c2f` (parent). One VM on
+**Starting condition.** Operator at [`55b22c2f`](https://github.com/frobware/bgp-cloud-connector/commit/55b22c2f8446724d85140d93705d015ec99c5993) (parent). One VM on
 `ip-10-0-52-81`, route written, `Ready`.
 
 **Action.** Remove `bgp_router` from that node, so the VM is on a node with no
@@ -259,7 +259,7 @@ path. Every profile in `test/e2e/manifests` sets `routerNodeSelector` to a
 dedicated pool and nothing steers VMs onto it, so a VM landing on an ordinary
 worker is the default outcome rather than an error case.
 
-**Corrected.** Same cluster state, operator at `06025769`:
+**Corrected.** Same cluster state, operator at [`06025769`](https://github.com/frobware/bgp-cloud-connector/commit/06025769e0b173d6cf9285cdbe925f2da5dc1275):
 
 ```
 phase=Ready
@@ -272,9 +272,9 @@ rewritten.
 
 ---
 
-## `145215e5` Own VM host route configurations from the BGPRouting
+## [`145215e5`](https://github.com/frobware/bgp-cloud-connector/commit/145215e5c3c40c44a93e3f6f7e2c601bbfda47b9) Own VM host route configurations from the BGPRouting
 
-**Starting condition.** Operator at `06025769` (parent). One VM, route written.
+**Starting condition.** Operator at [`06025769`](https://github.com/frobware/bgp-cloud-connector/commit/06025769e0b173d6cf9285cdbe925f2da5dc1275) (parent). One VM, route written.
 
 ```
 object: bgp-cc-vm-d11e75282d29917b
@@ -307,7 +307,7 @@ on originating the `/32` for a VM that may have moved or gone, and frr-k8s
 renders `no bgp network import-check` on every router, so FRR never rechecks
 whether a route for that prefix exists. Nothing withdraws it.
 
-**Corrected.** Same action, operator at `145215e5`:
+**Corrected.** Same action, operator at [`145215e5`](https://github.com/frobware/bgp-cloud-connector/commit/145215e5c3c40c44a93e3f6f7e2c601bbfda47b9):
 
 ```
 ownerReferences: BGPRouting/cudn1 uid=fa1e0252-adda-41bd-b784-66362c6495e0
@@ -321,9 +321,9 @@ legal owner relationship and one the collector honours.
 
 ---
 
-## `8ea89b4f` Stop counting VM host routes as another FRR consumer
+## [`8ea89b4f`](https://github.com/frobware/bgp-cloud-connector/commit/8ea89b4ffcb753135030c94917b11d5f775f8b06) Stop counting VM host routes as another FRR consumer
 
-**Starting condition.** Operator at `145215e5` (parent). No BGPRouting, one VM
+**Starting condition.** Operator at [`145215e5`](https://github.com/frobware/bgp-cloud-connector/commit/145215e5c3c40c44a93e3f6f7e2c601bbfda47b9) (parent). No BGPRouting, one VM
 host-route object left behind, and `status.frrProviderOwnership: Owned`.
 
 That last part is a precondition, not a result. The foreign-consumer check runs
@@ -348,14 +348,14 @@ itself in `Terminating` until they do. `ownedFRRConfiguration` asks whether the
 *BGPCloudConfiguration* owns the object, and these are owned by a *BGPRouting*
 and carry their own managed-by value, so neither term matches.
 
-**Corrected.** Same state, operator at `8ea89b4f`: deletion completes, and the
+**Corrected.** Same state, operator at [`8ea89b4f`](https://github.com/frobware/bgp-cloud-connector/commit/8ea89b4ffcb753135030c94917b11d5f775f8b06): deletion completes, and the
 object it used to complain about is left untouched.
 
 ---
 
-## `f04a1e65` Watch nodes and the cloud configuration from the routing controller
+## [`f04a1e65`](https://github.com/frobware/bgp-cloud-connector/commit/f04a1e653960c28151c867a0cc4ff2ca1a548df2) Watch nodes and the cloud configuration from the routing controller
 
-**Starting condition.** Operator at `8ea89b4f` (parent). VM running, route
+**Starting condition.** Operator at [`8ea89b4f`](https://github.com/frobware/bgp-cloud-connector/commit/8ea89b4ffcb753135030c94917b11d5f775f8b06) (parent). VM running, route
 written, `Ready`, and the operator verified quiet: no BGPRouting reconcile for
 a full 20-second sample.
 
@@ -373,6 +373,6 @@ groups a cloud discovers. It watches neither. Meanwhile `bgp-cc-N` is rewritten
 immediately by the controller that does watch Nodes, so the two disagree for
 the whole window.
 
-**Corrected.** Identical action, operator at `f04a1e65`: first reconcile after
+**Corrected.** Identical action, operator at [`f04a1e65`](https://github.com/frobware/bgp-cloud-connector/commit/f04a1e653960c28151c867a0cc4ff2ca1a548df2): first reconcile after
 **3 seconds**. Establishing the starting condition also needed no nudge on this
 binary, where the parent required one.

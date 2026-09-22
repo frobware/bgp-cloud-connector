@@ -142,6 +142,14 @@ func discoverVMHostRoutes(ctx context.Context, c client.Client, routing *network
 		if _, found := nodes[nodeName]; !found {
 			node := &corev1.Node{}
 			if err := c.Get(ctx, client.ObjectKey{Name: nodeName}, node); err != nil {
+				if apierrors.IsNotFound(err) {
+					// The node is gone while the VMI still names it. There is
+					// nothing to advertise from until KubeVirt moves the VMI to
+					// a terminal phase or reschedules it, so skip this one and
+					// leave the remaining VMIs and the prune to run.
+					pending = true
+					continue
+				}
 				return nil, nil, false, fmt.Errorf("getting node %q hosting VMI %s/%s: %w", nodeName, vmi.GetNamespace(), vmi.GetName(), err)
 			}
 			nodes[nodeName] = *node

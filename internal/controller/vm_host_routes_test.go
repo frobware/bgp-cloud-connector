@@ -286,3 +286,52 @@ func TestEffectivePeerGroupsUsesDiscoveredCloudState(t *testing.T) {
 		t.Fatalf("unexpected discovered groups: %#v", groups)
 	}
 }
+
+// A node can be deleted while a VMI still names it, during a scale-down, a
+// drain or a machine replacement. That VMI must not stop the routes for every
+// other node being written, nor stop the prune running.
+func TestEnsureVMHostRoutesSkipsVMIWhoseNodeIsGone(t *testing.T) {
+	ctx := context.Background()
+	routing := newTestBGPRouting()
+	config := newReadyBGPCloudConfiguration()
+	config.Spec.BGP.PeerGroups[0].NodeSelector = nil
+	live := testRouterNode("worker-a", "a")
+	stale := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "frrk8s.metallb.io/v1beta1", "kind": "FRRConfiguration",
+		"metadata": map[string]interface{}{
+			"name": vmHostRouteConfigurationName(routing.Name, "worker-stale"), "namespace": FRRNamespace,
+			"labels":      map[string]interface{}{LabelManagedBy: LabelManagedByVMHostRoutes},
+			"annotations": map[string]interface{}{AnnotationBGPRouting: routing.Name},
+		},
+	}}
+	c := fake.NewClientBuilder().WithScheme(vmHostRouteTestScheme()).WithObjects(
+		testVMNamespace(), live,
+		testVMI("vms", "vm-gone", "worker-gone", "10.100.0.9"),
+		testVMI("vms", "vm-live", live.Name, "10.100.0.4"),
+		stale,
+	).Build()
+
+	count, pending, err := EnsureVMHostRoutes(ctx, c, routing, config)
+	if err != nil {
+		t.Fatalf("EnsureVMHostRoutes: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want 1", count)
+	}
+	if !pending {
+		t.Fatal("expected the VMI on the missing node to leave routes pending")
+	}
+
+	got := &unstructured.Unstructured{}
+	got.SetGroupVersionKind(FRRConfigurationGVK)
+	liveKey := types.NamespacedName{Name: vmHostRouteConfigurationName(routing.Name, live.Name), Namespace: FRRNamespace}
+	if err := c.Get(ctx, liveKey, got); err != nil {
+		t.Fatalf("route for the surviving VM was not written: %v", err)
+	}
+
+	pruned := &unstructured.Unstructured{}
+	pruned.SetGroupVersionKind(FRRConfigurationGVK)
+	if err := c.Get(ctx, client.ObjectKeyFromObject(stale), pruned); !apierrors.IsNotFound(err) {
+		t.Fatalf("stale configuration was not pruned: %v", err)
+	}
+}

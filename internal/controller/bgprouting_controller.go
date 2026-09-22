@@ -161,6 +161,11 @@ func (r *BGPRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.setDegraded(ctx, routing, *baselineStatus, networkingapi.ConditionVMHostRoutesConfigured,
 			ReasonVMHostRoutesFailed, fmt.Sprintf("failed to ensure VM host routes: %v", err))
 	}
+	// Phase tracks the network. A VM whose address has not appeared yet is
+	// reported on the condition and requeued for, but it does not make the
+	// ClusterUDN and the RouteAdvertisements any less configured, and a VM
+	// that never schedules would otherwise hold the CR short of Ready for as
+	// long as it exists.
 	if hostRoutesPending {
 		meta.SetStatusCondition(&routing.Status.Conditions, metav1.Condition{
 			Type:               networkingapi.ConditionVMHostRoutesConfigured,
@@ -169,20 +174,15 @@ func (r *BGPRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			Message:            fmt.Sprintf("Configured %d VM host routes; waiting for VM addresses", hostRouteCount),
 			ObservedGeneration: routing.Generation,
 		})
-		if err := r.patchRoutingStatus(ctx, routing, *baselineStatus, func(rt *networkingapi.BGPRouting) {
-			rt.Status.Phase = networkingapi.PhaseConfiguring
-		}); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	} else {
+		meta.SetStatusCondition(&routing.Status.Conditions, metav1.Condition{
+			Type:               networkingapi.ConditionVMHostRoutesConfigured,
+			Status:             metav1.ConditionTrue,
+			Reason:             ReasonReconciled,
+			Message:            fmt.Sprintf("Configured %d VM host routes", hostRouteCount),
+			ObservedGeneration: routing.Generation,
+		})
 	}
-	meta.SetStatusCondition(&routing.Status.Conditions, metav1.Condition{
-		Type:               networkingapi.ConditionVMHostRoutesConfigured,
-		Status:             metav1.ConditionTrue,
-		Reason:             ReasonReconciled,
-		Message:            fmt.Sprintf("Configured %d VM host routes", hostRouteCount),
-		ObservedGeneration: routing.Generation,
-	})
 
 	if err := r.patchRoutingStatus(ctx, routing, *baselineStatus, func(rt *networkingapi.BGPRouting) {
 		rt.Status.Phase = networkingapi.PhaseReady
@@ -191,6 +191,9 @@ func (r *BGPRoutingReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	log.Info("reconciliation complete", "phase", routing.Status.Phase)
+	if hostRoutesPending {
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 

@@ -173,7 +173,7 @@ func TestRoutingReconcile_FullReconcile(t *testing.T) {
 	}
 }
 
-func TestRoutingReconcile_WaitsForVMIAddress(t *testing.T) {
+func TestRoutingReconcile_StaysReadyWhileVMIAddressIsPending(t *testing.T) {
 	routing := newTestBGPRouting()
 	routing.Finalizers = []string{RoutingFinalizerName}
 	config := newReadyBGPCloudConfiguration()
@@ -200,8 +200,8 @@ func TestRoutingReconcile_WaitsForVMIAddress(t *testing.T) {
 	if err := c.Get(context.Background(), client.ObjectKeyFromObject(routing), updated); err != nil {
 		t.Fatalf("get BGPRouting: %v", err)
 	}
-	if updated.Status.Phase != networkingapi.PhaseConfiguring {
-		t.Fatalf("phase = %s, want Configuring", updated.Status.Phase)
+	if updated.Status.Phase != networkingapi.PhaseReady {
+		t.Fatalf("phase = %s, want Ready", updated.Status.Phase)
 	}
 	condition := meta.FindStatusCondition(updated.Status.Conditions, networkingapi.ConditionVMHostRoutesConfigured)
 	if condition == nil || condition.Status != metav1.ConditionUnknown || condition.Reason != ReasonWaitingForVMIPs {

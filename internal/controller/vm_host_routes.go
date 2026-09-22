@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	networkingapi "github.com/openshift/bgp-cloud-connector/api/v1beta1"
 	"github.com/openshift/bgp-cloud-connector/internal/platform"
@@ -377,6 +378,14 @@ func ensureVMHostRouteConfiguration(ctx context.Context, c client.Client, routin
 			"bgp":          bgp,
 		},
 	}}
+	// BGPRouting is cluster-scoped, so it is a legal owner for a namespaced
+	// dependent and the collector reaps these when it goes. Removing the
+	// BGPRouting finalizer by hand is otherwise enough to strand them, and
+	// frr-k8s emits "no bgp network import-check", so a stranded object goes on
+	// originating its prefixes with nothing in the RIB to contradict it.
+	if err := controllerutil.SetControllerReference(routing, obj, c.Scheme()); err != nil {
+		return fmt.Errorf("setting owner reference on %s: %w", name, err)
+	}
 	return createOrUpdate(ctx, c, obj, nil)
 }
 

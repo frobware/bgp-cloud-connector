@@ -341,3 +341,42 @@ func TestEnsureVMHostRoutesSkipsVMIWhoseNodeIsGone(t *testing.T) {
 		t.Fatalf("stale configuration was not pruned: %v", err)
 	}
 }
+
+// BGPRouting is cluster-scoped and FRRConfiguration is namespaced, which is a
+// legal owner relationship and one the garbage collector honours. Without the
+// reference nothing removes these objects when the BGPRouting goes by any route
+// other than its own finalizer, and frr-k8s renders "no bgp network
+// import-check", so FRR keeps originating their prefixes with no route behind
+// them.
+func TestEnsureVMHostRoutesSetsOwnerReference(t *testing.T) {
+	ctx := context.Background()
+	routing := newTestBGPRouting()
+	config := newReadyBGPCloudConfiguration()
+	config.Spec.BGP.PeerGroups[0].NodeSelector = nil
+	node := testRouterNode("worker-a", "a")
+	c := fake.NewClientBuilder().WithScheme(vmHostRouteTestScheme()).WithObjects(
+		testVMNamespace(), node, testVMI("vms", "vm", node.Name, "10.100.0.4"),
+	).Build()
+
+	if _, err := EnsureVMHostRoutes(ctx, c, routing, config); err != nil {
+		t.Fatalf("EnsureVMHostRoutes: %v", err)
+	}
+
+	got := &unstructured.Unstructured{}
+	got.SetGroupVersionKind(FRRConfigurationGVK)
+	key := types.NamespacedName{Name: vmHostRouteConfigurationName(routing.Name, node.Name), Namespace: FRRNamespace}
+	if err := c.Get(ctx, key, got); err != nil {
+		t.Fatalf("get FRRConfiguration: %v", err)
+	}
+
+	refs := got.GetOwnerReferences()
+	if len(refs) != 1 {
+		t.Fatalf("ownerReferences = %#v, want exactly one", refs)
+	}
+	ref := refs[0]
+	if ref.APIVersion != networkingapi.GroupVersion.String() || ref.Kind != "BGPRouting" ||
+		ref.Name != routing.Name || ref.UID != routing.UID ||
+		ref.Controller == nil || !*ref.Controller {
+		t.Fatalf("ownerReference = %#v, want a controller reference to BGPRouting %s (%s)", ref, routing.Name, routing.UID)
+	}
+}

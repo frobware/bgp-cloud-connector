@@ -63,6 +63,7 @@ func newTestBGPRouting() *networkingapi.BGPRouting {
 	return &networkingapi.BGPRouting{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "prod",
+			UID:  "6d2f5b1e-0f5a-4a1e-9f4c-0b7d2a5c1e33",
 		},
 		Spec: networkingapi.BGPRoutingSpec{
 			Network: networkingapi.NetworkConfig{

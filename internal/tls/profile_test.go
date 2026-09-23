@@ -5,6 +5,7 @@ import (
 	gotls "crypto/tls"
 	"fmt"
 	"testing"
+	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -225,4 +226,42 @@ type getErrorClient struct {
 
 func (c getErrorClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 	return c.err
+}
+
+func TestGetProfileInfoFallsBackWhenGetHangs(t *testing.T) {
+	defer func(d time.Duration) { apiServerGetTimeout = d }(apiServerGetTimeout)
+	apiServerGetTimeout = 100 * time.Millisecond
+
+	type result struct {
+		profile Profile
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		p, err := GetProfileInfo(context.Background(), hangingGetClient{}, apiPresentDiscovery())
+		done <- result{p, err}
+	}()
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("GetProfileInfo() error = %v", r.err)
+		}
+		if !r.profile.watch || len(r.profile.TLSOpts) == 0 {
+			t.Fatalf("expected the platform default with a watch, got watch=%v opts=%d", r.profile.watch, len(r.profile.TLSOpts))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("GetProfileInfo did not return while the APIServer Get hung")
+	}
+}
+
+// hangingGetClient blocks every Get until its context is done, as an API
+// server that accepts the request and never answers.
+type hangingGetClient struct {
+	client.Client
+}
+
+func (hangingGetClient) Get(ctx context.Context, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+	<-ctx.Done()
+	return ctx.Err()
 }

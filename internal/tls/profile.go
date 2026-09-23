@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	configv1 "github.com/openshift/api/config/v1"
@@ -32,6 +33,12 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// apiServerGetTimeout bounds the startup read of apiservers/cluster so that a
+// hung read falls back to the platform default. The health probe binds only
+// after this read, so discovery (client-go's 32s default) plus this must stay
+// inside the liveness window, which fails at 55s.
+var apiServerGetTimeout = 10 * time.Second
 
 // Profile holds the cluster TLS security profile and the controller-runtime
 // TLSOpts that should be applied to operator TLS servers.
@@ -70,8 +77,11 @@ func GetProfileInfo(ctx context.Context, client ctrlclient.Client, discoveryClie
 
 	// API served: read the cluster object, falling back to the platform default
 	// if it can't be read. Either way we watch so a later object can replace it.
+	getCtx, cancel := context.WithTimeoutCause(ctx, apiServerGetTimeout,
+		fmt.Errorf("no response from API server within %s", apiServerGetTimeout))
+	defer cancel()
 	apiServer := &configv1.APIServer{}
-	if err := client.Get(ctx, types.NamespacedName{Name: openshifttls.APIServerName}, apiServer); err != nil {
+	if err := client.Get(getCtx, types.NamespacedName{Name: openshifttls.APIServerName}, apiServer); err != nil {
 		log.Error(err, "unable to get APIServer TLS profile, using platform default")
 		return profileFromAPIServer(log, nil, true)
 	}

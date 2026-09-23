@@ -36,9 +36,9 @@ import (
 
 // apiServerGetTimeout bounds the startup read of apiservers/cluster so that a
 // hung read falls back to the platform default. The health probe binds only
-// after this read, so discovery (client-go's 32s default) plus this must stay
-// inside the liveness window, which fails at 55s.
-var apiServerGetTimeout = 10 * time.Second
+// after this read, so discovery (client-go's 32s default) plus this should end
+// before the shipped liveness probe's third failure, around 60s after start.
+const apiServerGetTimeout = 10 * time.Second
 
 // Profile holds the cluster TLS security profile and the controller-runtime
 // TLSOpts that should be applied to operator TLS servers.
@@ -62,6 +62,10 @@ type Profile struct {
 // When the object is read, TLSOpts apply the cluster profile only if
 // ShouldHonorClusterTLSProfile is true.
 func GetProfileInfo(ctx context.Context, client ctrlclient.Client, discoveryClient discovery.ServerResourcesInterface) (Profile, error) {
+	return getProfileInfo(ctx, client, discoveryClient, apiServerGetTimeout)
+}
+
+func getProfileInfo(ctx context.Context, client ctrlclient.Client, discoveryClient discovery.ServerResourcesInterface, getTimeout time.Duration) (Profile, error) {
 	log := logr.FromContextOrDiscard(ctx)
 
 	present, err := apiServerAPIPresent(discoveryClient)
@@ -77,8 +81,8 @@ func GetProfileInfo(ctx context.Context, client ctrlclient.Client, discoveryClie
 
 	// API served: read the cluster object, falling back to the platform default
 	// if it can't be read. Either way we watch so a later object can replace it.
-	getCtx, cancel := context.WithTimeoutCause(ctx, apiServerGetTimeout,
-		fmt.Errorf("no response from API server within %s", apiServerGetTimeout))
+	getCtx, cancel := context.WithTimeoutCause(ctx, getTimeout,
+		fmt.Errorf("APIServer read did not complete within %s", getTimeout))
 	defer cancel()
 	apiServer := &configv1.APIServer{}
 	if err := client.Get(getCtx, types.NamespacedName{Name: openshifttls.APIServerName}, apiServer); err != nil {

@@ -4,9 +4,12 @@ import (
 	"context"
 	gotls "crypto/tls"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	configv1 "github.com/openshift/api/config/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -229,16 +232,16 @@ func (c getErrorClient) Get(ctx context.Context, key client.ObjectKey, obj clien
 }
 
 func TestGetProfileInfoFallsBackWhenGetHangs(t *testing.T) {
-	defer func(d time.Duration) { apiServerGetTimeout = d }(apiServerGetTimeout)
-	apiServerGetTimeout = 100 * time.Millisecond
-
 	type result struct {
 		profile Profile
 		err     error
 	}
+	var logged strings.Builder
+	log := funcr.New(func(_, args string) { logged.WriteString(args + "\n") }, funcr.Options{})
+
 	done := make(chan result, 1)
 	go func() {
-		p, err := GetProfileInfo(context.Background(), hangingGetClient{}, apiPresentDiscovery())
+		p, err := getProfileInfo(logr.NewContext(context.Background(), log), hangingGetClient{}, apiPresentDiscovery(), 100*time.Millisecond)
 		done <- result{p, err}
 	}()
 
@@ -250,18 +253,22 @@ func TestGetProfileInfoFallsBackWhenGetHangs(t *testing.T) {
 		if !r.profile.watch || len(r.profile.TLSOpts) == 0 {
 			t.Fatalf("expected the platform default with a watch, got watch=%v opts=%d", r.profile.watch, len(r.profile.TLSOpts))
 		}
+		if want := "APIServer read did not complete within 100ms"; !strings.Contains(logged.String(), want) {
+			t.Fatalf("log does not name the deadline %q:\n%s", want, logged.String())
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("GetProfileInfo did not return while the APIServer Get hung")
 	}
 }
 
 // hangingGetClient blocks every Get until its context is done, as an API
-// server that accepts the request and never answers.
+// server that accepts the request and never answers. It returns the context's
+// cause, as net/http does when a request's context ends.
 type hangingGetClient struct {
 	client.Client
 }
 
 func (hangingGetClient) Get(ctx context.Context, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
 	<-ctx.Done()
-	return ctx.Err()
+	return context.Cause(ctx)
 }

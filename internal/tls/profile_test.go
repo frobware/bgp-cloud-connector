@@ -3,11 +3,15 @@ package tls
 import (
 	"context"
 	gotls "crypto/tls"
+	"fmt"
 	"testing"
 
 	configv1 "github.com/openshift/api/config/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -17,31 +21,67 @@ func TestGetProfileInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	apiServerGVR := schema.GroupResource{Group: configv1.GroupVersion.Group, Resource: "apiservers"}
+
 	tests := []struct {
-		name        string
-		spec        *configv1.APIServerSpec
-		wantOpts    bool
-		wantMinTLS  uint16
-		wantCiphers bool
+		name            string
+		spec            *configv1.APIServerSpec
+		discoveryClient stubDiscovery
+		getErr          error
+		wantErr         bool
+		wantOpts        bool
+		wantWatch       bool
+		wantMinTLS      uint16
+		wantCiphers     bool
 	}{
 		{
-			name: "missing APIServer returns an empty profile",
-			spec: nil,
+			name:            "discovery failure is fatal",
+			discoveryClient: stubDiscovery{err: fmt.Errorf("connection refused")},
+			wantErr:         true,
+		},
+		{
+			name:            "API not served uses the platform default and does not watch",
+			discoveryClient: stubDiscovery{err: apierrors.NewNotFound(apiServerGVR, "")},
+			wantOpts:        true,
+			wantWatch:       false,
+			wantMinTLS:      gotls.VersionTLS12,
+			wantCiphers:     true,
+		},
+		{
+			name:            "missing APIServer uses the platform default and still watches",
+			discoveryClient: apiPresentDiscovery(),
+			wantOpts:        true,
+			wantWatch:       true,
+			wantMinTLS:      gotls.VersionTLS12,
+			wantCiphers:     true,
+		},
+		{
+			name:            "Get failure uses the platform default and still watches",
+			discoveryClient: apiPresentDiscovery(),
+			getErr:          fmt.Errorf("service unavailable"),
+			wantOpts:        true,
+			wantWatch:       true,
+			wantMinTLS:      gotls.VersionTLS12,
+			wantCiphers:     true,
 		},
 		{
 			name: "legacy does not apply the cluster profile",
 			spec: &configv1.APIServerSpec{
 				TLSAdherence: configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly,
 			},
+			discoveryClient: apiPresentDiscovery(),
+			wantWatch:       true,
 		},
 		{
 			name: "strict applies Intermediate when the APIServer profile is unset",
 			spec: &configv1.APIServerSpec{
 				TLSAdherence: configv1.TLSAdherencePolicyStrictAllComponents,
 			},
-			wantOpts:    true,
-			wantMinTLS:  gotls.VersionTLS12,
-			wantCiphers: true,
+			discoveryClient: apiPresentDiscovery(),
+			wantOpts:        true,
+			wantWatch:       true,
+			wantMinTLS:      gotls.VersionTLS12,
+			wantCiphers:     true,
 		},
 		{
 			name: "strict applies the configured profile",
@@ -49,8 +89,10 @@ func TestGetProfileInfo(t *testing.T) {
 				TLSAdherence:       configv1.TLSAdherencePolicyStrictAllComponents,
 				TLSSecurityProfile: &configv1.TLSSecurityProfile{Type: configv1.TLSProfileModernType},
 			},
-			wantOpts:   true,
-			wantMinTLS: gotls.VersionTLS13,
+			discoveryClient: apiPresentDiscovery(),
+			wantOpts:        true,
+			wantWatch:       true,
+			wantMinTLS:      gotls.VersionTLS13,
 		},
 	}
 
@@ -63,16 +105,35 @@ func TestGetProfileInfo(t *testing.T) {
 					Spec:       *tt.spec,
 				})
 			}
-			c := builder.Build()
+			var c client.Client = builder.Build()
+			if tt.getErr != nil {
+				c = getErrorClient{Client: c, err: tt.getErr}
+			}
 
-			got, err := GetProfileInfo(context.Background(), c)
+			got, err := GetProfileInfo(context.Background(), c, tt.discoveryClient)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("GetProfileInfo() error = %v", err)
 			}
 
+			if got.watch != tt.wantWatch {
+				t.Fatalf("watch = %v, want %v", got.watch, tt.wantWatch)
+			}
+
+			if !tt.wantWatch {
+				if err := got.SetupProfileWatch(context.Background(), nil, nil); err != nil {
+					t.Fatalf("SetupProfileWatch skipped path returned %v", err)
+				}
+			}
+
 			if tt.wantOpts {
 				if len(got.TLSOpts) == 0 {
-					t.Fatal("expected TLSOpts when honoring the cluster profile")
+					t.Fatal("expected TLSOpts when using the cluster or platform default profile")
 				}
 				cfg := &gotls.Config{}
 				for _, opt := range got.TLSOpts {
@@ -126,4 +187,42 @@ func TestShouldHonorAdherenceChange(t *testing.T) {
 			}
 		})
 	}
+}
+
+func apiPresentDiscovery() stubDiscovery {
+	return stubDiscovery{
+		list: &metav1.APIResourceList{
+			APIResources: []metav1.APIResource{{Kind: "APIServer"}},
+		},
+	}
+}
+
+type stubDiscovery struct {
+	list *metav1.APIResourceList
+	err  error
+}
+
+func (s stubDiscovery) ServerResourcesForGroupVersion(string) (*metav1.APIResourceList, error) {
+	return s.list, s.err
+}
+
+func (s stubDiscovery) ServerGroupsAndResources() ([]*metav1.APIGroup, []*metav1.APIResourceList, error) {
+	return nil, nil, nil
+}
+
+func (s stubDiscovery) ServerPreferredResources() ([]*metav1.APIResourceList, error) {
+	return nil, nil
+}
+
+func (s stubDiscovery) ServerPreferredNamespacedResources() ([]*metav1.APIResourceList, error) {
+	return nil, nil
+}
+
+type getErrorClient struct {
+	client.Client
+	err error
+}
+
+func (c getErrorClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	return c.err
 }

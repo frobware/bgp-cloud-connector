@@ -33,6 +33,7 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/discovery"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
@@ -107,7 +108,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	tlsProfile, err := bgptls.GetProfileInfo(logr.NewContext(ctx, setupLog), tlsProfileClient)
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		setupLog.Error(err, "unable to create discovery client")
+		os.Exit(1)
+	}
+
+	tlsProfile, err := bgptls.GetProfileInfo(logr.NewContext(ctx, setupLog), tlsProfileClient, discoveryClient)
 	if err != nil {
 		setupLog.Error(err, "unable to get TLS profile options")
 		os.Exit(1)

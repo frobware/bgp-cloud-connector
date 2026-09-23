@@ -15,6 +15,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -271,4 +273,65 @@ type hangingGetClient struct {
 func (hangingGetClient) Get(ctx context.Context, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
 	<-ctx.Done()
 	return context.Cause(ctx)
+}
+
+// TestProfileWatcherConvergesAfterFallback starts from a Profile built either
+// from a failed read (the fallback) or from the object itself, reconciles the
+// object once, and checks whether the pod would restart. A restart is wanted
+// exactly when a clean start from the object would serve different TLS.
+func TestProfileWatcherConvergesAfterFallback(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := configv1.Install(scheme); err != nil {
+		t.Fatal(err)
+	}
+	old := &configv1.TLSSecurityProfile{Type: configv1.TLSProfileOldType, Old: &configv1.OldTLSProfile{}}
+
+	tests := []struct {
+		name        string
+		fallback    bool
+		spec        configv1.APIServerSpec
+		wantRestart bool
+	}{
+		{name: "fallback, adherence absent", fallback: true, wantRestart: true},
+		{name: "fallback, Legacy", fallback: true,
+			spec: configv1.APIServerSpec{TLSAdherence: configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly}, wantRestart: true},
+		{name: "fallback, Legacy with Old profile", fallback: true,
+			spec: configv1.APIServerSpec{TLSAdherence: configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly, TLSSecurityProfile: old}, wantRestart: true},
+		{name: "fallback, Strict with default profile", fallback: true,
+			spec: configv1.APIServerSpec{TLSAdherence: configv1.TLSAdherencePolicyStrictAllComponents}},
+		{name: "fallback, Strict with Old profile", fallback: true,
+			spec: configv1.APIServerSpec{TLSAdherence: configv1.TLSAdherencePolicyStrictAllComponents, TLSSecurityProfile: old}, wantRestart: true},
+		{name: "fallback, unknown adherence with default profile", fallback: true,
+			spec: configv1.APIServerSpec{TLSAdherence: "SomeFuturePolicy"}},
+		{name: "clean start, adherence absent"},
+		{name: "clean start, Legacy with Old profile",
+			spec: configv1.APIServerSpec{TLSAdherence: configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly, TLSSecurityProfile: old}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&configv1.APIServer{
+				ObjectMeta: metav1.ObjectMeta{Name: "cluster"},
+				Spec:       tt.spec,
+			}).Build()
+
+			var startup client.Client = c
+			if tt.fallback {
+				startup = getErrorClient{Client: c, err: fmt.Errorf("service unavailable")}
+			}
+			p, err := GetProfileInfo(context.Background(), startup, apiPresentDiscovery())
+			if err != nil {
+				t.Fatalf("GetProfileInfo() error = %v", err)
+			}
+
+			restarted := false
+			w := p.newProfileWatcher(c, logr.Discard(), func() { restarted = true })
+			if _, err := w.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "cluster"}}); err != nil {
+				t.Fatalf("Reconcile() error = %v", err)
+			}
+			if restarted != tt.wantRestart {
+				t.Fatalf("restarted = %v, want %v", restarted, tt.wantRestart)
+			}
+		})
+	}
 }

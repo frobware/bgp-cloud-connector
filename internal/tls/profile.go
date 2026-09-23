@@ -155,13 +155,15 @@ func apiServerAPIPresent(discoveryClient discovery.ServerResourcesInterface) (bo
 	return false, nil
 }
 
-// profileFromAPIServer builds a Profile from apiServer. A nil apiServer uses the
-// platform default profile and empty adherence (no ShouldHonor check); a non-nil
-// apiServer uses its TLSSecurityProfile and TLSAdherence. watch sets whether
-// SetupProfileWatch will install a watcher for this Profile.
+// profileFromAPIServer builds a Profile from apiServer. A nil apiServer applies
+// the platform default profile and records StrictAllComponents, the adherence
+// under which that profile is honoured, so the watcher restarts the pod once
+// the real object shows that a clean start would serve something else. A
+// non-nil apiServer uses its TLSSecurityProfile and TLSAdherence. watch sets
+// whether SetupProfileWatch will install a watcher for this Profile.
 func profileFromAPIServer(log logr.Logger, apiServer *configv1.APIServer, watch bool) (Profile, error) {
 	var securityProfile *configv1.TLSSecurityProfile
-	var adherence configv1.TLSAdherencePolicy
+	adherence := configv1.TLSAdherencePolicyStrictAllComponents
 	honor := true // the platform default (nil apiServer) is always applied
 	if apiServer != nil {
 		securityProfile = apiServer.Spec.TLSSecurityProfile

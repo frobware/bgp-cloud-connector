@@ -98,14 +98,23 @@ func getProfileInfo(ctx context.Context, client ctrlclient.Client, discoveryClie
 // cancel the manager context and let the Deployment restart the pod.
 // No watcher is registered when the APIServer API is not served.
 func (p *Profile) SetupProfileWatch(ctx context.Context, mgr ctrl.Manager, onChange func()) error {
-	log := logr.FromContextOrDiscard(ctx)
-
 	if !p.watch {
 		return nil
 	}
 
-	tlsProfileWatcher := &openshifttls.SecurityProfileWatcher{
-		Client:                    mgr.GetClient(),
+	w := p.newProfileWatcher(mgr.GetClient(), logr.FromContextOrDiscard(ctx), onChange)
+	if err := w.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("failed to setup TLS profile watcher: %w", err)
+	}
+
+	return nil
+}
+
+// newProfileWatcher returns the watcher SetupProfileWatch registers, calling
+// onChange when a change to apiservers/cluster alters what p applies.
+func (p *Profile) newProfileWatcher(client ctrlclient.Client, log logr.Logger, onChange func()) *openshifttls.SecurityProfileWatcher {
+	return &openshifttls.SecurityProfileWatcher{
+		Client:                    client,
 		InitialTLSProfileSpec:     p.profileSpec,
 		InitialTLSAdherencePolicy: p.adherence,
 		OnProfileChange: func(_ context.Context, oldProfile, newProfile configv1.TLSProfileSpec) {
@@ -128,12 +137,6 @@ func (p *Profile) SetupProfileWatch(ctx context.Context, mgr ctrl.Manager, onCha
 			onChange()
 		},
 	}
-
-	if err := tlsProfileWatcher.SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("failed to setup TLS profile watcher: %w", err)
-	}
-
-	return nil
 }
 
 func apiServerAPIPresent(discoveryClient discovery.ServerResourcesInterface) (bool, error) {

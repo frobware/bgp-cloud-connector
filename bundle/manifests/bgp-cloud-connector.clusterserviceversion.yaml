@@ -46,7 +46,7 @@ metadata:
     capabilities: Basic Install
     categories: Networking
     containerImage: controller:latest
-    createdAt: "2026-09-17T09:00:38Z"
+    createdAt: "2026-09-24T00:00:00Z"
     description: Automates L3 direct routing between CUDN Pod networks and external
       networks via BGP on OpenShift. Cloud platform aware — auto-discovers BGP infrastructure
       on AWS (VPC Route Server) and works on-premise with explicit configuration.
@@ -62,7 +62,7 @@ metadata:
       Container Platform", "OpenShift Platform Plus"]'
     operators.operatorframework.io/builder: operator-sdk-v1.42.2
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
-  name: bgp-cloud-connector.v0.1.0
+  name: bgp-cloud-connector.v1.0.0
   namespace: placeholder
 spec:
   apiservicedefinitions: {}
@@ -83,10 +83,6 @@ spec:
       name: bgproutings.networking.openshift.io
       version: v1beta1
   description: |
-    **Important:** This is a beta release. The API may still change in
-    backward-incompatible ways. It is not yet supported by Red Hat for
-    production use.
-
     BGP cloud connector automates L3 direct routing between
     Cluster User Defined Networks (CUDN) and external networks via BGP
     on OpenShift. Core BGP and CUDN functionality works on any OpenShift
@@ -376,4 +372,4 @@ spec:
   minKubeVersion: 1.31.0
   provider:
     name: Red Hat
-  version: 0.1.0
+  version: 1.0.0

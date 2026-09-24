@@ -47,6 +47,7 @@ import (
 
 	networkingapi "github.com/openshift/bgp-cloud-connector/api/v1beta1"
 	azureplatform "github.com/openshift/bgp-cloud-connector/internal/platform/azure"
+	e2e "github.com/openshift/bgp-cloud-connector/test/e2e"
 )
 
 var (
@@ -79,6 +80,8 @@ func TestAzureE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Azure E2E Suite")
 }
+
+var _ = e2e.RegisterJUnitReporter("junit_azure_e2e.xml")
 
 var _ = BeforeSuite(func() {
 	// See the note in the AWS suite: a profile generated per run cannot

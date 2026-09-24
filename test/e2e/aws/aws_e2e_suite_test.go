@@ -62,6 +62,8 @@ func TestAWSE2E(t *testing.T) {
 	RunSpecs(t, "AWS E2E Suite")
 }
 
+var _ = e2e.RegisterJUnitReporter("junit_aws_e2e.xml")
+
 var _ = BeforeSuite(func() {
 	// E2E_MANIFEST_DIR takes an absolute path and skips the profile
 	// lookup entirely. A profile has to be a directory under

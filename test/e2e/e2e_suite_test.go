@@ -78,6 +78,8 @@ func TestE2E(t *testing.T) {
 	RunSpecs(t, "E2E Suite")
 }
 
+var _ = RegisterJUnitReporter("junit_e2e.xml")
+
 var _ = BeforeSuite(func() {
 	// See the note in the AWS suite: a generated profile cannot live
 	// under test/e2e/manifests, so an explicit directory wins.

@@ -9,7 +9,7 @@ COPY LICENSE /licenses/
 ENTRYPOINT ["/bin/opm"]
 
 # Copy the FBC catalog (OCP version-based)
-COPY catalog/v4.22/catalog.yaml /configs/bgp-cloud-connector/catalog.yaml
+COPY catalog/v4.22/bgp-cloud-connector /configs/bgp-cloud-connector
 
 # Pre-populate serve cache
 RUN ["/bin/opm", "serve", "/configs/bgp-cloud-connector", "--cache-dir=/tmp/cache", "--cache-only"]

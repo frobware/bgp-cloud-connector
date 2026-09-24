@@ -380,8 +380,8 @@ endif
 
 .PHONY: generate-catalog
 generate-catalog: opm ## Generate OCP version-based FBC catalog from template.
-	mkdir -p $(OCP_CATALOG_DIR)
-	$(OPM) alpha render-template basic --migrate-level bundle-object-to-csv-metadata -o yaml $(OCP_CATALOG_DIR)/catalog-template.yaml > $(OCP_CATALOG_DIR)/catalog.yaml
+	mkdir -p $(OCP_CATALOG_DIR)/bgp-cloud-connector
+	$(OPM) alpha render-template basic --migrate-level bundle-object-to-csv-metadata -o yaml $(OCP_CATALOG_DIR)/catalog-template.yaml > $(OCP_CATALOG_DIR)/bgp-cloud-connector/catalog.yaml
 
 # The bundle image to include in the catalog (must exist in a registry and be pull-able).
 BUNDLE_IMGS ?= $(BUNDLE_IMG)

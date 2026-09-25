@@ -149,7 +149,11 @@ var ambientCredential = func() (azcore.TokenCredential, error) {
 // unreachable from a pod, and spec.azure.networkInterfaceClientID means
 // two identities can be in play at once, which one process-wide chain
 // cannot express.
-func ResolveCredentials(ctx context.Context, c client.Client, namespace string, owner metav1.OwnerReference) (azcore.TokenCredential, error) {
+//
+// The tenant is returned beside the credential because the second
+// identity lives in it and nothing else in the pod names it. It is the
+// secret's; a credential found by the SDK's chain comes with none.
+func ResolveCredentials(ctx context.Context, c client.Client, namespace string, owner metav1.OwnerReference) (azcore.TokenCredential, string, error) {
 	logger := log.FromContext(ctx)
 
 	secret := &corev1.Secret{}
@@ -158,10 +162,10 @@ func ResolveCredentials(ctx context.Context, c client.Client, namespace string, 
 	case err == nil:
 		cred, err := credentialFromSecret(secret)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if err := validateCredential(ctx, cred); err != nil {
-			return nil, &platform.CredentialError{
+			return nil, "", &platform.CredentialError{
 				Msg: fmt.Sprintf("the credential in secret %s/%s was refused: %v",
 					namespace, CredentialsSecretName, err),
 			}
@@ -178,24 +182,24 @@ func ResolveCredentials(ctx context.Context, c client.Client, namespace string, 
 		// an operator that cannot write its own request is worth
 		// seeing.
 		if err := reconcileCredentialsRequest(ctx, c, namespace, owner); err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		return cred, nil
+		return cred, string(secret.Data[secretTenantID]), nil
 	case !apierrors.IsNotFound(err):
-		return nil, fmt.Errorf("reading secret %s/%s: %w", namespace, CredentialsSecretName, err)
+		return nil, "", fmt.Errorf("reading secret %s/%s: %w", namespace, CredentialsSecretName, err)
 	}
 
 	if cred, err := ambientCredential(); err == nil {
 		if err := validateCredential(ctx, cred); err == nil {
 			logger.V(1).Info("using the credential already available to this process")
-			return cred, nil
+			return cred, "", nil
 		}
 	}
 
 	if err := reconcileCredentialsRequest(ctx, c, namespace, owner); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return nil, fmt.Errorf("%w: secret %s/%s has not been written yet",
+	return nil, "", fmt.Errorf("%w: secret %s/%s has not been written yet",
 		platform.ErrCredentialsPending, namespace, CredentialsSecretName)
 }
 

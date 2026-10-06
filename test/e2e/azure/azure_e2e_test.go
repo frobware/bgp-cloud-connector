@@ -393,18 +393,20 @@ var _ = Describe("Azure E2E", Ordered, func() {
 				isRouter[n.Name] = true
 			}
 			addresses := make([]string, 0, len(dests))
+			workers := make([]string, 0, len(dests))
 			for _, d := range dests {
 				GinkgoWriter.Printf("worker %s: pod %s, router=%v, forwarding=%v\n",
 					d.Node, d.PodAddress, isRouter[d.Node], d.Forwarding)
 				addresses = append(addresses, d.PodAddress)
+				workers = append(workers, d.Node)
 			}
 
 			By(fmt.Sprintf("requesting /clientip from every pod via the client VM at %s", vmAddress))
-			Eventually(func(g Gomega) {
+			e2e.ProbeAllowingOVNKubeRestart(ctx, k8sClient, workers, 5*time.Minute, 30*time.Second, func(g Gomega) {
 				answers, probeErr := probe(ctx, addresses)
 				g.Expect(probeErr).NotTo(HaveOccurred())
 				g.Expect(e2e.CheckAnswers(dests, answers, vmAddress)).To(Succeed())
-			}).WithTimeout(5 * time.Minute).WithPolling(30 * time.Second).Should(Succeed())
+			})
 
 			// After the probe, so that a run which trips this has already
 			// shown whether every pod it could reach answered.

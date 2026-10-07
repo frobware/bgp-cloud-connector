@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -62,6 +63,65 @@ var networkObjects = []struct {
 	{"frrconfigurations.yaml", []string{"get", "frrconfigurations.frrk8s.metallb.io", "-A"}},
 	{"network-attachment-definitions.yaml", []string{"get", "network-attachment-definitions.k8s.cni.cncf.io", "-A"}},
 	{"network-operator.yaml", []string{"get", "network.operator.openshift.io", "cluster"}},
+}
+
+const (
+	frrK8sNamespace = "openshift-frr-k8s"
+	frrApp          = "frr-k8s"
+
+	// nodeCommandTimeout bounds each command run on a node, so one that
+	// hangs costs only its own file.
+	nodeCommandTimeout = 2 * time.Minute
+)
+
+// ovnkubeNodeCommands are run on each worker, in the named container of
+// its ovnkube-node pod. The pod uses the host's network namespace, so ip,
+// nft, iptables and conntrack show the node's own state. Every node runs
+// its own OVN databases, so the NB and SB commands read that node's view.
+var ovnkubeNodeCommands = []struct {
+	file      string
+	container string
+	args      []string
+}{
+	{"ovn-nb-show.txt", "nbdb", []string{"ovn-nbctl", "--no-leader-only", "show"}},
+	{"ovn-nb-dump.txt", "nbdb", []string{"ovsdb-client", "dump", "unix:/var/run/ovn/ovnnb_db.sock"}},
+	{"ovn-sb-show.txt", "sbdb", []string{"ovn-sbctl", "--no-leader-only", "show"}},
+	{"ovn-sb-lflows.txt", "sbdb", []string{"ovn-sbctl", "--no-leader-only", "lflow-list"}},
+	{"ovs-vsctl-show.txt", "ovn-controller", []string{"ovs-vsctl", "show"}},
+	{"br-int-flows.txt", "ovn-controller", []string{"ovs-ofctl", "dump-flows", "br-int"}},
+	{"br-ex-ports.txt", "ovn-controller", []string{"ovs-ofctl", "dump-ports-desc", "br-ex"}},
+	{"datapath-flows.txt", "ovn-controller", []string{"ovs-appctl", "dpctl/dump-flows", "-m"}},
+	{"ip-addr.txt", "ovnkube-controller", []string{"ip", "-d", "addr"}},
+	{"ip-rule.txt", "ovnkube-controller", []string{"ip", "rule"}},
+	{"ip-route.txt", "ovnkube-controller", []string{"ip", "route", "show", "table", "all"}},
+	{"ip-neigh.txt", "ovnkube-controller", []string{"ip", "neigh"}},
+	{"nft-ruleset.txt", "ovnkube-controller", []string{"nft", "list", "ruleset"}},
+	{"iptables.txt", "ovnkube-controller", []string{"iptables-save"}},
+	{"conntrack.txt", "ovnkube-controller", []string{"conntrack", "-L"}},
+}
+
+// routerCommands are run in each worker's nbdb container for each of its
+// logical routers. Whether a network's pod addresses are SNATed on the
+// way out is in the NAT of its gateway router, GR_<network>_<node>.
+var routerCommands = []struct {
+	file string
+	verb string
+}{
+	{"nat", "lr-nat-list"},
+	{"routes", "lr-route-list"},
+	{"policies", "lr-policy-list"},
+}
+
+// frrCommands are run on each worker, in the frr container of its frr-k8s
+// pod.
+var frrCommands = []struct {
+	file string
+	args []string
+}{
+	{"frr-running-config.txt", []string{"vtysh", "-c", "show running-config"}},
+	{"frr-bgp-summary.txt", []string{"vtysh", "-c", "show bgp vrf all summary"}},
+	{"frr-bgp-ipv4.txt", []string{"vtysh", "-c", "show bgp vrf all ipv4 unicast"}},
+	{"frr-routes.txt", []string{"vtysh", "-c", "show ip route vrf all"}},
 }
 
 // ProbeAllowingOVNKubeRestart runs check until it passes or timeout
@@ -167,12 +227,17 @@ func ovnkubeNodePods(ctx context.Context, c client.Client) (map[string]*corev1.P
 //
 //	br-ex-flows/<node>.txt         ovs-ofctl dump-flows br-ex
 //	ovnkube-controller/<node>.log  that node's ovnkube-controller log
+//	nodes/<node>/<file>            ovnkubeNodeCommands and frrCommands
+//	nodes/<node>/<router>-<file>.txt
+//	                               routerCommands for each logical router
+//	                               on the node
 //	operator.log                   the operator's log
 //	<kind>.yaml                    networkObjects, with managedFields
 //
-// and returns the directory. It goes through oc, as
-// hack/report-br-ex-flows.sh does, and needs oc on PATH. It is
-// diagnostics only: anything that cannot be read is logged and skipped.
+// and returns the directory. Workers are recorded in parallel. It goes
+// through oc, as hack/report-br-ex-flows.sh does, and needs oc on PATH.
+// It is diagnostics only: anything that cannot be read is logged and
+// skipped.
 func recordNetworkState(ctx context.Context, c client.Client, workers []string, name string) string {
 	dir := filepath.Join(os.Getenv("ARTIFACT_DIR"), name)
 	if os.Getenv("ARTIFACT_DIR") == "" {
@@ -195,19 +260,91 @@ func recordNetworkState(ctx context.Context, c client.Client, workers []string, 
 		ginkgo.GinkgoWriter.Printf("%s: ovnkube-node pods not listed: %v\n", name, err)
 		return dir
 	}
+	frr, err := frrPods(ctx, c)
+	if err != nil {
+		ginkgo.GinkgoWriter.Printf("%s: frr-k8s pods not listed: %v\n", name, err)
+	}
+	var wg sync.WaitGroup
 	for _, node := range workers {
 		pod, ok := pods[node]
 		if !ok {
 			ginkgo.GinkgoWriter.Printf("%s: no ovnkube-node pod on %s\n", name, node)
 			continue
 		}
-		ocToFile(ctx, filepath.Join(dir, "br-ex-flows", node+".txt"),
-			"-n", ovnNamespace, "exec", pod.Name, "-c", "ovn-controller", "--", "ovs-ofctl", "dump-flows", "br-ex")
-		ocToFile(ctx, filepath.Join(dir, "ovnkube-controller", node+".log"),
-			"-n", ovnNamespace, "logs", pod.Name, "-c", "ovnkube-controller", "--timestamps")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recordNode(ctx, dir, node, pod.Name, frr[node])
+		}()
 	}
+	wg.Wait()
 	ginkgo.GinkgoWriter.Printf("network state written to %s\n", dir)
 	return dir
+}
+
+// recordNode writes one worker's part of recordNetworkState. frrPod is
+// empty when the worker has no frr-k8s pod.
+func recordNode(ctx context.Context, dir, node, ovnkubePod, frrPod string) {
+	ocToFile(ctx, filepath.Join(dir, "br-ex-flows", node+".txt"),
+		"-n", ovnNamespace, "exec", ovnkubePod, "-c", "ovn-controller", "--", "ovs-ofctl", "dump-flows", "br-ex")
+	ocToFile(ctx, filepath.Join(dir, "ovnkube-controller", node+".log"),
+		"-n", ovnNamespace, "logs", ovnkubePod, "-c", "ovnkube-controller", "--timestamps")
+
+	nodeDir := filepath.Join(dir, "nodes", node)
+	inPod := func(container string, args ...string) []string {
+		return append([]string{"-n", ovnNamespace, "exec", ovnkubePod, "-c", container, "--"}, args...)
+	}
+	for _, cmd := range ovnkubeNodeCommands {
+		ocToFile(ctx, filepath.Join(nodeDir, cmd.file), inPod(cmd.container, cmd.args...)...)
+	}
+
+	routers, err := oc(ctx, inPod("nbdb", "ovn-nbctl", "--no-leader-only", "--bare", "--columns=name", "list", "Logical_Router")...)
+	if err != nil {
+		ginkgo.GinkgoWriter.Printf("%s: logical routers not listed: %v\n", node, err)
+	}
+	for _, router := range strings.Fields(string(routers)) {
+		for _, cmd := range routerCommands {
+			ocToFile(ctx, filepath.Join(nodeDir, router+"-"+cmd.file+".txt"),
+				inPod("nbdb", "ovn-nbctl", "--no-leader-only", cmd.verb, router)...)
+		}
+	}
+
+	if frrPod == "" {
+		ginkgo.GinkgoWriter.Printf("%s: no frr-k8s pod\n", node)
+		return
+	}
+	for _, cmd := range frrCommands {
+		ocToFile(ctx, filepath.Join(nodeDir, cmd.file),
+			append([]string{"-n", frrK8sNamespace, "exec", frrPod, "-c", "frr", "--"}, cmd.args...)...)
+	}
+}
+
+// frrPods maps each node to the name of its frr-k8s pod.
+func frrPods(ctx context.Context, c client.Client) (map[string]string, error) {
+	pods := &corev1.PodList{}
+	if err := c.List(ctx, pods, client.InNamespace(frrK8sNamespace),
+		client.MatchingLabels{"app": frrApp}); err != nil {
+		return nil, err
+	}
+	byNode := map[string]string{}
+	for _, pod := range pods.Items {
+		if pod.DeletionTimestamp == nil {
+			byNode[pod.Spec.NodeName] = pod.Name
+		}
+	}
+	return byNode, nil
+}
+
+// oc runs oc with args, for at most nodeCommandTimeout, and returns its
+// standard output.
+func oc(ctx context.Context, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, nodeCommandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "oc", args...).Output()
+	if err != nil {
+		return nil, fmt.Errorf("oc %s: %w", strings.Join(args, " "), err)
+	}
+	return out, nil
 }
 
 // ocToFile runs oc with args and writes its standard output to path,
@@ -217,9 +354,9 @@ func ocToFile(ctx context.Context, path string, args ...string) {
 		ginkgo.GinkgoWriter.Printf("%s not recorded: %v\n", path, err)
 		return
 	}
-	out, err := exec.CommandContext(ctx, "oc", args...).Output()
+	out, err := oc(ctx, args...)
 	if err != nil {
-		ginkgo.GinkgoWriter.Printf("%s not recorded: oc %s: %v\n", path, strings.Join(args, " "), err)
+		ginkgo.GinkgoWriter.Printf("%s not recorded: %v\n", path, err)
 		return
 	}
 	if err := os.WriteFile(path, out, 0o644); err != nil {

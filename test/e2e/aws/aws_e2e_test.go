@@ -379,10 +379,12 @@ var _ = Describe("AWS E2E", Ordered, func() {
 				isRouter[n.Name] = true
 			}
 			addresses := make([]string, 0, len(dests))
+			workers := make([]string, 0, len(dests))
 			for _, d := range dests {
 				GinkgoWriter.Printf("worker %s: pod %s, router=%v, forwarding=%v\n",
 					d.Node, d.PodAddress, isRouter[d.Node], d.Forwarding)
 				addresses = append(addresses, d.PodAddress)
+				workers = append(workers, d.Node)
 			}
 
 			// Longer than on Azure: AWS reported the peers up and
@@ -390,11 +392,11 @@ var _ = Describe("AWS E2E", Ordered, func() {
 			// CRs were applied, measured once. The specs before this one
 			// normally cover that, but the probe should not depend on it.
 			By(fmt.Sprintf("requesting /clientip from every pod via the client instance at %s", clientAddress))
-			Eventually(func(g Gomega) {
+			e2e.ProbeAllowingOVNKubeRestart(ctx, k8sClient, workers, 10*time.Minute, 30*time.Second, func(g Gomega) {
 				answers, probeErr := probe(ctx, instanceID, addresses)
 				g.Expect(probeErr).NotTo(HaveOccurred())
 				g.Expect(e2e.CheckAnswers(dests, answers, clientAddress)).To(Succeed())
-			}).WithTimeout(10 * time.Minute).WithPolling(30 * time.Second).Should(Succeed())
+			})
 
 			// After the probe, so that a run which trips this has already
 			// shown whether every pod it could reach answered.

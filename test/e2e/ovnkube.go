@@ -298,7 +298,8 @@ func recordNode(ctx context.Context, dir, node, ovnkubePod, frrPod string) {
 		ocToFile(ctx, filepath.Join(nodeDir, cmd.file), inPod(cmd.container, cmd.args...)...)
 	}
 
-	routers, err := oc(ctx, inPod("nbdb", "ovn-nbctl", "--no-leader-only", "--bare", "--columns=name", "list", "Logical_Router")...)
+	routers, err := oc(ctx, inPod("nbdb",
+		"ovn-nbctl", "--no-leader-only", "--bare", "--columns=name", "list", "Logical_Router")...)
 	if err != nil {
 		ginkgo.GinkgoWriter.Printf("%s: logical routers not listed: %v\n", node, err)
 	}

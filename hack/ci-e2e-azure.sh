@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Entry point for the e2e-azure prow job: run the test, capture what it
-# said, then tear down whatever is there. Always.
+# said, and then tear down whatever is there. Always.
 #
 #   hack/ci-e2e-azure.sh
 #

@@ -69,6 +69,11 @@ gcp_router_name()   { printf '%s-cudn-cr' "$1"; }
 gcp_firewall_name() { printf '%s-bgp' "$1"; }
 gcp_spoke_prefix()  { printf '%s-bgp-spoke' "$1"; }
 
+# The e2e client outside the cluster, and the rule admitting it to the
+# workers. The client's network tag is its own name.
+gcp_client_name()          { printf '%s-e2e-client' "$1"; }
+gcp_client_firewall_name() { printf '%s-e2e-client' "$1"; }
+
 # Existence is decided here, not by gcloud.
 #
 # --filter is not an identity test and is not even consistent about what
@@ -109,6 +114,12 @@ gcp_firewall_exists() {
         --format='value(name)'
 }
 
+gcp_instance_exists() {
+    gcp_name_exists "$1" "list instances in $2" \
+        gcloud compute instances list --project="$3" --zones="$2" \
+        --format='value(name)'
+}
+
 # The permissions the scripts here need, as IAM names them.
 #
 # This is the CI cluster profile's account in a job and yours at a desk.
@@ -141,6 +152,16 @@ gcp_estate_permissions=(
     networkconnectivity.hubs.delete # delete-cloud-router.sh
     networkconnectivity.hubs.list   # gcp_hub_exists
     networkconnectivity.spokes.list # delete-cloud-router.sh, before the hub goes
+    compute.instances.create        # create-client-vm.sh
+    compute.instances.delete        # delete-client-vm.sh
+    compute.instances.get           # the e2e suite, finding the client
+    compute.instances.getSerialPortOutput # the e2e suite, reading a probe round
+    compute.instances.list          # gcp_instance_exists, and the e2e suite
+    compute.instances.setLabels     # create-client-vm.sh, labels at create
+    compute.instances.setMetadata   # the startup script at create, and each probe round
+    compute.instances.setTags       # create-client-vm.sh, the network tag at create
+    compute.disks.create            # create-client-vm.sh, the boot disk
+    compute.subnetworks.use         # create-client-vm.sh, an address in the worker subnet
 )
 
 # gcp_permissions_held prints which of the named permissions this
